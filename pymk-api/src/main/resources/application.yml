@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: pymk-api
+
+  # Wired up but unused until Day 2 (JPA entities) / Day 12 (Redis caching).
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pymk
+    username: pymk
+    password: pymk
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

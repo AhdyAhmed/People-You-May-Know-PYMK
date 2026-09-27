@@ -90,9 +90,10 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-Every module except `pymk-api` is intentionally empty right now — Day 1's
-job was to get the wiring, dependency graph, and package layout right before
-any real logic lands. See the roadmap for what fills in each module and when.
+`pymk-domain` and `pymk-api` have real content as of Day 2; the rest are
+still intentionally empty — Day 1's job was to get the wiring, dependency
+graph, and package layout right before logic lands module by module. See the
+roadmap for what fills in each module and when.
 
 ## Quickstart
 
@@ -129,7 +130,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 
 - [x] **Day 1 — Repo & environment setup**: multi-module Maven skeleton (10
       modules), Docker Compose (Postgres + pgvector, Redis), CI build.
-- [ ] Day 2 — Core JPA entities (`Member`, `Connection`, `MemberEvent`)
+- [x] **Day 2 — Core JPA entities**: `Member`, `Connection`, `MemberEvent` (+
+      `EventType`) in `pymk-domain`, with a Flyway migration for the schema
+      (indexes on `connections`, `member_events`, and the heuristic-source
+      lookup columns on `members`).
 - [ ] Day 3 — Repositories & basic queries
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 

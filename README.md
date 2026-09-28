@@ -120,6 +120,18 @@ curl http://localhost:8080/
 # {"service":"pymk-api","status":"up","milestone":"M1 - Day 1: repo & environment setup"}
 ```
 
+## Tests
+
+```bash
+mvn -B verify
+```
+
+Repository and integration tests run against a real Postgres (with pgvector)
+started by [Testcontainers](https://testcontainers.com/), so **Docker must be
+running**, but you do *not* need `docker compose up` for the test suite. Tests
+also run `spring.jpa.hibernate.ddl-auto=validate`, so a mismatch between the
+JPA entities and the Flyway migrations fails the build.
+
 To stop the local infra: `docker compose -f infra/docker-compose.yml down`
 (add `-v` to also wipe the Postgres/Redis volumes).
 
@@ -134,7 +146,12 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       `EventType`) in `pymk-domain`, with a Flyway migration for the schema
       (indexes on `connections`, `member_events`, and the heuristic-source
       lookup columns on `members`).
-- [ ] Day 3 — Repositories & basic queries
+- [x] **Day 3 — Repositories & basic queries**: Spring Data repositories for
+      the three entities, a `ConnectionService` that owns the "one connection =
+      two rows" invariant, and Testcontainers tests proving symmetric inserts,
+      DB-level constraints, and index-backed adjacency lookups on a 5,000-member
+      / ~50K-edge graph.
+- [ ] Day 4 — Synthetic data generator
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

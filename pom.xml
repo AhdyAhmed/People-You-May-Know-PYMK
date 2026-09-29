@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.11</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.ahdyahmed.pymk</groupId>
+  <artifactId>pymk</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>pymk</name>
+  <description>People You May Know (PYMK) - portfolio-scale multi-stage recommendation backend</description>
+  <url>https://github.com/AhdyAhmed/People-You-May-Know-PYMK</url>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <modules>
+    <module>pymk-common</module>
+    <module>pymk-domain</module>
+    <module>pymk-feature-store</module>
+    <module>pymk-candidate-gen</module>
+    <module>pymk-light-ranker</module>
+    <module>pymk-heavy-ranker</module>
+    <module>pymk-reranker</module>
+    <module>pymk-orchestrator</module>
+    <module>pymk-api</module>
+    <module>pymk-batch</module>
+    <module>pymk-datagen</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Keep every module's Spring Boot / Spring Data / etc. versions aligned
+           through the parent BOM. Module-specific deps are declared where used. -->
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-feature-store</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-candidate-gen</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-light-ranker</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-heavy-ranker</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-reranker</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-orchestrator</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

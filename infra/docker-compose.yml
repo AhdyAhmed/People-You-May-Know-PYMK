@@ -1,0 +1,46 @@
+version: "3.9"
+
+# PYMK local dev stack — Day 1 (see PYMK_ROADMAP.md).
+# Usage:
+#   docker compose -f infra/docker-compose.yml up -d
+#   docker compose -f infra/docker-compose.yml down          # stop
+#   docker compose -f infra/docker-compose.yml down -v       # stop + wipe data
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: pymk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pymk
+      POSTGRES_USER: pymk
+      POSTGRES_PASSWORD: pymk
+    ports:
+      - "5432:5432"
+    volumes:
+      - pymk_postgres_data:/var/lib/postgresql/data
+      # Enables the pgvector extension on first container init (Day 5 needs this).
+      - ./init-sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pymk -d pymk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pymk-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - pymk_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pymk_postgres_data:
+  pymk_redis_data:

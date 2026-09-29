@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.ahdyahmed.pymk</groupId>
+    <artifactId>pymk</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>pymk-datagen</artifactId>
+  <packaging>jar</packaging>
+  <name>pymk-datagen</name>
+  <description>
+    Dev-tooling CLI: generates a synthetic member/connection/event dataset and
+    bulk-loads it into Postgres. Deliberately separate from pymk-batch, which
+    is reserved for the recurring production-style Spring Batch jobs
+    (FeatureComputationJob, EmbeddingRefreshJob, etc. - see PYMK_DESIGN.md
+    section 7). This module is a one-off seeding tool, not a batch job.
+  </description>
+
+  <dependencies>
+    <!-- Brings spring-boot-starter-data-jpa, the Postgres driver, and
+         flyway-core/flyway-database-postgresql transitively. Flyway runs the
+         same V1 migration pymk-api uses, so this module never seeds a schema
+         that has drifted from the entities. HibernateJpaAutoConfiguration is
+         excluded in PymkDataGenApplication since this module writes with
+         raw JDBC batches for bulk-insert throughput, not JPA. -->
+    <dependency>
+      <groupId>com.ahdyahmed.pymk</groupId>
+      <artifactId>pymk-domain</artifactId>
+    </dependency>
+
+    <!-- Not managed by the Spring Boot BOM: version pinned explicitly. -->
+    <dependency>
+      <groupId>net.datafaker</groupId>
+      <artifactId>datafaker</artifactId>
+      <version>2.7.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>pymk-datagen</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

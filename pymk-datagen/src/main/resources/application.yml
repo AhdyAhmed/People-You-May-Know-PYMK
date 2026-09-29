@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: pymk-datagen
+  main:
+    web-application-type: none
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pymk
+    username: pymk
+    password: pymk
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+pymk:
+  datagen:
+    members: 100000
+    avg-degree: 12
+    events-per-member: 6.0
+    seed: 42
+    truncate-existing: true
+    organization-pool-size: 250

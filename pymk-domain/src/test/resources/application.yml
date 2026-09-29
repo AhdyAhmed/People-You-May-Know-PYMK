@@ -1,9 +1,0 @@
-spring:
-  jpa:
-    open-in-view: false
-    hibernate:
-      # Flyway owns the schema; Hibernate only checks that every entity
-      # mapping matches what the migrations actually created.
-      ddl-auto: validate
-  flyway:
-    locations: classpath:db/migration

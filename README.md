@@ -6,10 +6,11 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (fairness/diversity)**.
 
-> 🚧 **Status: Day 1 of 30** — repo, multi-module build, and local
-> infrastructure are up. See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md)
-> for the day-by-day build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md)
-> for the full system design.
+> 🚧 **Status: Day 5 of 30** — repo, multi-module build, core JPA entities,
+> repositories, the synthetic data generator, and pgvector embeddings are up.
+> See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
+> build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
+> system design.
 
 ---
 
@@ -34,7 +35,7 @@ flowchart LR
         UI[Web/Mobile Client]
     end
 
-    UI -->|GET /pymk/{memberId}| GW[pymk-api]
+    UI -->|"GET /pymk/{memberId}"| GW[pymk-api]
     GW --> ORCH[Orchestrator]
 
     subgraph Online["Online Serving Pipeline"]
@@ -91,7 +92,7 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 4; the rest are
+`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 5; the rest are
 still intentionally empty — Day 1's job was to get the wiring, dependency
 graph, and package layout right before logic lands module by module. See the
 roadmap for what fills in each module and when.
@@ -161,7 +162,13 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       timeline-consistent invite/profile-view/search events, bulk-loaded via
       chunked JDBC batches with a post-load summary report. Defaults to
       100,000 members.
-- [ ] Day 5 — pgvector + embeddings table
+- [x] **Day 5 — pgvector + embeddings table**: `member_embeddings`
+      (Hibernate's native `hibernate-vector` module maps `float[]` to
+      pgvector's `vector(128)`), an HNSW cosine-distance index, ANN search
+      via `EmbeddingSearchRepository`, placeholder random vectors from
+      `pymk-datagen`, and a test proving the ANN query returns
+      semantically-sensible neighbors on constructed clusters.
+- [ ] Day 6 — `pymk-api` skeleton (real endpoints)
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

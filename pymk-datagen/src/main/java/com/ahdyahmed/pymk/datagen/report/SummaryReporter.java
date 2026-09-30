@@ -30,6 +30,7 @@ public class SummaryReporter {
         long memberCount = count("members");
         long connectionCount = count("connections");
         long eventCount = count("member_events");
+        long embeddingCount = count("member_embeddings");
 
         StringBuilder sb = new StringBuilder();
         sb.append("\n================ PYMK synthetic dataset summary ================\n");
@@ -37,6 +38,8 @@ public class SummaryReporter {
         sb.append("connections:     ").append(connectionCount)
                 .append(" directed rows (").append(connectionCount / 2).append(" undirected edges)\n");
         sb.append("member_events:   ").append(eventCount).append('\n');
+        sb.append("embeddings:      ").append(embeddingCount)
+                .append(" (placeholder random vectors - see pymk-datagen/README.md)\n");
         sb.append('\n');
         sb.append(degreeDistribution());
         sb.append('\n');

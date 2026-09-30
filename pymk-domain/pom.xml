@@ -45,6 +45,16 @@
       <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
+    <!-- Not in the Spring Boot BOM: pinned to ${hibernate.version}, the same
+         property Spring Boot uses for hibernate-core, so the two never drift
+         apart. Gives @JdbcTypeCode(SqlTypes.VECTOR) for mapping float[] to
+         pgvector's `vector` column type (Hibernate 6.4+). -->
+    <dependency>
+      <groupId>org.hibernate.orm</groupId>
+      <artifactId>hibernate-vector</artifactId>
+      <version>${hibernate.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>

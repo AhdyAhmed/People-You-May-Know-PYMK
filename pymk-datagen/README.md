@@ -24,6 +24,15 @@ one of the recurring Spring Batch jobs (`FeatureComputationJob`,
   connection (using the connection's own timestamp, so the two agree), plus
   additional `PROFILE_VIEW` / `SEARCH_APPEARANCE` / ignored-invite volume
   sampled over 2-hop "friend of a friend" pairs.
+- **Embeddings** — a random, L2-normalized 128-dim placeholder vector per
+  member (Day 5). These carry no semantic meaning by construction — they
+  exist so the ANN query path (`member_embeddings`, pgvector's `<->`
+  operator) has real rows to run against end to end. Real embeddings
+  (node2vec over the connection graph, or profile-text embeddings) replace
+  them in Week 4 via `EmbeddingRefreshJob`. `pymk-domain`'s
+  `MemberEmbeddingAnnQueryTest` is what actually proves the ANN query
+  behaves sensibly, using embeddings constructed to be meaningful — these
+  placeholders are volume, not a correctness demo.
 
 Everything is seeded (`pymk.datagen.seed`, default `42`): the same seed and
 member count always produce the exact same dataset.
@@ -58,7 +67,9 @@ By default the generator **truncates** `members`, `connections`, and
 Logs progress per stage (generation, load, per-table batch progress) and
 finishes with a summary: row counts, degree distribution (min/p50/p95/p99/max),
 top 5 companies by headcount, and event-type counts — the "sanity-check
-counts and distribution" step the roadmap calls for.
+counts and distribution" step the roadmap calls for. Embedding row count is
+included too, though "distribution" doesn't mean much for random noise —
+that's what `MemberEmbeddingAnnQueryTest` (`pymk-domain`) is for.
 
 ## Configuration
 

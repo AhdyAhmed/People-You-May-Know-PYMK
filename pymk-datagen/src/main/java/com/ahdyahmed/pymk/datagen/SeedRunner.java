@@ -8,9 +8,11 @@ import com.ahdyahmed.pymk.datagen.generate.EventGenerator.EventRecord;
 import com.ahdyahmed.pymk.datagen.generate.MemberFactory;
 import com.ahdyahmed.pymk.datagen.generate.MemberFactory.MemberRecord;
 import com.ahdyahmed.pymk.datagen.generate.OrganizationPool;
+import com.ahdyahmed.pymk.datagen.generate.PlaceholderEmbeddingFactory;
 import com.ahdyahmed.pymk.datagen.generate.PreferentialAttachmentGraphGenerator;
 import com.ahdyahmed.pymk.datagen.generate.PreferentialAttachmentGraphGenerator.Edge;
 import com.ahdyahmed.pymk.datagen.load.BulkLoader;
+import com.ahdyahmed.pymk.datagen.load.BulkLoader.MemberEmbeddingRecord;
 import com.ahdyahmed.pymk.datagen.report.SummaryReporter;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -56,6 +58,7 @@ public class SeedRunner implements CommandLineRunner {
         Random graphRandom = new Random(masterRandom.nextLong());
         Random timelineRandom = new Random(masterRandom.nextLong());
         Random eventRandom = new Random(masterRandom.nextLong());
+        Random embeddingRandom = new Random(masterRandom.nextLong());
         Faker faker = new Faker(new Random(masterRandom.nextLong()));
         Instant now = Instant.now();
 
@@ -90,11 +93,21 @@ public class SeedRunner implements CommandLineRunner {
                 new EventGenerator(eventRandom).generate(props.getMembers(), timestampedEdges, targetEventCount, now));
         timed("Loading events", () -> loader.insertEvents(events));
 
+        List<MemberEmbeddingRecord> embeddingRows = timed("Generating placeholder embeddings", () -> {
+            PlaceholderEmbeddingFactory embeddingFactory = new PlaceholderEmbeddingFactory(embeddingRandom);
+            List<MemberEmbeddingRecord> result = new ArrayList<>(props.getMembers());
+            for (long id = 1; id <= props.getMembers(); id++) {
+                result.add(new MemberEmbeddingRecord(id, embeddingFactory.create(), now));
+            }
+            return result;
+        });
+        timed("Loading embeddings", () -> loader.insertEmbeddings(embeddingRows));
+
         reporter.report();
 
         double totalSeconds = (System.nanoTime() - overallStart) / 1_000_000_000.0;
-        log.info("Done in {} s: {} members, {} undirected edges, {} events",
-                String.format("%.1f", totalSeconds), members.size(), edges.size(), events.size());
+        log.info("Done in {} s: {} members, {} undirected edges, {} events, {} embeddings",
+                String.format("%.1f", totalSeconds), members.size(), edges.size(), events.size(), embeddingRows.size());
     }
 
     private <T> T timed(String label, java.util.function.Supplier<T> work) {

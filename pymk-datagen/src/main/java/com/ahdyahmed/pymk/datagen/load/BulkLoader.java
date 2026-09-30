@@ -3,7 +3,9 @@ package com.ahdyahmed.pymk.datagen.load;
 import com.ahdyahmed.pymk.datagen.generate.ConnectionTimelineGenerator.TimestampedEdge;
 import com.ahdyahmed.pymk.datagen.generate.EventGenerator.EventRecord;
 import com.ahdyahmed.pymk.datagen.generate.MemberFactory.MemberRecord;
+import com.ahdyahmed.pymk.domain.vector.VectorLiterals;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -29,8 +31,8 @@ public class BulkLoader {
     }
 
     public void truncateAll() {
-        log.info("Truncating member_events, connections, members ...");
-        jdbc.execute("TRUNCATE TABLE member_events, connections, members RESTART IDENTITY CASCADE");
+        log.info("Truncating member_events, connections, member_embeddings, members ...");
+        jdbc.execute("TRUNCATE TABLE member_events, connections, member_embeddings, members RESTART IDENTITY CASCADE");
     }
 
     public void insertMembers(List<MemberRecord> members) {
@@ -68,6 +70,25 @@ public class BulkLoader {
         executeBatched(
                 "INSERT INTO member_events (actor_member_id, target_member_id, type, occurred_at) VALUES (?,?,?,?)",
                 rows, "member_events");
+    }
+
+    /**
+     * Bulk-writes placeholder embeddings. Binds each vector as a plain text
+     * literal and casts server-side with {@code CAST(? AS vector)} - see
+     * {@link VectorLiterals} for why that avoids any pgvector-specific JDBC
+     * type registration.
+     */
+    public void insertEmbeddings(List<MemberEmbeddingRecord> embeddings) {
+        List<Object[]> rows = new ArrayList<>(embeddings.size());
+        for (MemberEmbeddingRecord e : embeddings) {
+            rows.add(new Object[] {e.memberId(), VectorLiterals.toLiteral(e.embedding()), Timestamp.from(e.updatedAt())});
+        }
+        executeBatched(
+                "INSERT INTO member_embeddings (member_id, embedding, updated_at) VALUES (?, CAST(? AS vector), ?)",
+                rows, "member_embeddings");
+    }
+
+    public record MemberEmbeddingRecord(long memberId, float[] embedding, Instant updatedAt) {
     }
 
     private void executeBatched(String sql, List<Object[]> rows, String label) {

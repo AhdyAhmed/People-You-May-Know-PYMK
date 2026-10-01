@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (fairness/diversity)**.
 
-> 🚧 **Status: Day 6 of 30 (Part 1 of 3 done)** — repo, multi-module build, core JPA entities,
+> 🚧 **Status: Day 6 of 30 (Part 2 of 3 done)** — repo, multi-module build, core JPA entities,
 > repositories, the synthetic data generator, and pgvector embeddings are up.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -125,6 +125,9 @@ curl http://localhost:8080/
 # {"service":"pymk-api","status":"up","milestone":"M1 - Day 1: repo & environment setup"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
+curl -X POST http://localhost:8080/api/v1/connections \
+  -H 'Content-Type: application/json' \
+  -d '{"memberId": 42, "connectedMemberId": 981}'   # Day 6, Part 2
 open http://localhost:8080/swagger-ui.html        # interactive API docs
 ```
 
@@ -174,7 +177,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [ ] **Day 6 — `pymk-api` skeleton** *(in progress, built in 3 parts)*
   - [x] Part 1 — springdoc OpenAPI + Swagger UI, `GET /api/v1/members/{id}`,
         RFC 9457 `ProblemDetail` error handling, MockMvc + Testcontainers tests.
-  - [ ] Part 2 — `POST /api/v1/connections` (validation, idempotency, 404/409).
+  - [x] Part 2 — `POST /api/v1/connections`: Bean Validation, idempotent
+        (201 created / 200 already connected), 400 self-connect, 404 unknown
+        member, 409 on the unique-constraint race.
   - [ ] Part 3 — polish: status endpoint, README API section, end-to-end test.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 

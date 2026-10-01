@@ -33,6 +33,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
+    <!-- Bean Validation for request DTOs (@Valid, @NotNull, @Positive). -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
     <!-- Serves /v3/api-docs and Swagger UI (/swagger-ui.html). -->
     <dependency>
       <groupId>org.springdoc</groupId>

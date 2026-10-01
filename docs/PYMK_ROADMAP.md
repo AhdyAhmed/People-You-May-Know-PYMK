@@ -31,6 +31,7 @@ Companion to `PYMK_DESIGN.md`. Assumes ~1–2 focused hours/day. Organized into 
 **Day 6 — `pymk-api` skeleton**
 - Stand up `GET /api/v1/members/{id}` and `POST /api/v1/connections` as the first real endpoints.
 - OpenAPI/Swagger UI wired up.
+- *Built in 3 parts:* **(1)** OpenAPI/Swagger + `GET /members/{id}` + error handling ✅ · **(2)** `POST /connections` · **(3)** polish + end-to-end test.
 
 **Day 7 — Buffer / catch-up + write-up**
 - Fix anything slipped from Days 1–6.

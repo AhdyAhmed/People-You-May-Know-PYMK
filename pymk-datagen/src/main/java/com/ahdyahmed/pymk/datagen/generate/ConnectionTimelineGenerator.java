@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -23,12 +24,35 @@ public final class ConnectionTimelineGenerator {
     }
 
     public List<TimestampedEdge> assignTimestamps(
-            List<PreferentialAttachmentGraphGenerator.Edge> edges, Instant now, int maxDaysAgo) {
+            List<PreferentialAttachmentGraphGenerator.Edge> edges,
+            Instant now,
+            int maxDaysAgo,
+            Map<Long, Instant> memberCreatedAt) {
         List<TimestampedEdge> timestamped = new ArrayList<>(edges.size());
         for (PreferentialAttachmentGraphGenerator.Edge edge : edges) {
-            int daysAgo = 1 + random.nextInt(maxDaysAgo);
-            timestamped.add(new TimestampedEdge(edge, now.minus(Duration.ofDays(daysAgo))));
+            Instant windowStart = now.minus(Duration.ofDays(maxDaysAgo));
+            Instant participantsAvailableAt = later(
+                    requiredCreationTime(memberCreatedAt, edge.memberA()),
+                    requiredCreationTime(memberCreatedAt, edge.memberB()));
+            Instant earliest = later(windowStart, participantsAvailableAt);
+            long availableSeconds = Duration.between(earliest, now).getSeconds();
+            Instant connectedAt = availableSeconds == 0
+                    ? now
+                    : earliest.plusSeconds(random.nextLong(availableSeconds + 1));
+            timestamped.add(new TimestampedEdge(edge, connectedAt));
         }
         return timestamped;
+    }
+
+    private static Instant requiredCreationTime(Map<Long, Instant> memberCreatedAt, long memberId) {
+        Instant createdAt = memberCreatedAt.get(memberId);
+        if (createdAt == null) {
+            throw new IllegalArgumentException("Missing creation timestamp for member " + memberId);
+        }
+        return createdAt;
+    }
+
+    private static Instant later(Instant left, Instant right) {
+        return left.isAfter(right) ? left : right;
     }
 }

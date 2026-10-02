@@ -1,6 +1,7 @@
 spring:
   jpa:
     open-in-view: false
+    show-sql: false
     hibernate:
       # Flyway owns the schema; Hibernate only checks that every entity
       # mapping matches what the migrations actually created.

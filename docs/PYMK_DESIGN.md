@@ -9,7 +9,7 @@ A portfolio-scale reimplementation of LinkedIn-style "People You May Know" recom
 **Functional goals**
 - Given a member, recommend a ranked list of other members they are likely to connect with.
 - Support explicit signals (mutual connections, shared company/school, location) and implicit signals (profile views, search appearances).
-- Provide a fairness/diversity pass so results aren't dominated by a single cluster (e.g. all coworkers).
+- Provide an exposure-diversity pass so results are not dominated by a single cluster (e.g. all coworkers), while avoiding unsupported claims of protected-attribute fairness.
 - Serve recommendations with low latency (<150ms p99 target for demo scale).
 
 **Non-functional / portfolio goals**
@@ -18,8 +18,26 @@ A portfolio-scale reimplementation of LinkedIn-style "People You May Know" recom
 - Show both the "traditional Spring backend" skills (JPA, REST, caching, batch jobs) and applied ML engineering (feature engineering, model training/serving, offline evaluation).
 
 **Out of scope (documented, not built)**
-- True graph-database-scale traversal (we simulate with a graph adjacency table in Postgres + optional Neo4j module).
-- Real-time streaming infra (Kafka is included as an optional module, not mandatory for v1).
+- True graph-database-scale traversal (v1 uses a graph adjacency table in Postgres; Neo4j or adjacency shards are upgrade paths, not current modules).
+- Real-time streaming infrastructure (Kafka may be added later, but is not part of v1 or the current repository).
+- Authentication, authorization, and abuse controls. The portfolio API is local/demo infrastructure and must not be exposed publicly without them.
+
+### 1.1 Document status and implementation boundary
+
+This document is the **target design**, not a claim that every box already
+exists. The roadmap is the delivery authority when design and implementation
+status differ.
+
+| Area | Current status |
+|---|---|
+| Maven modules, Postgres/pgvector/Redis local infrastructure | Implemented through Day 1 |
+| Core entities, Flyway schema, repositories, symmetric connection service | Implemented through Day 3 |
+| Synthetic members, graph, temporally valid events, placeholder embeddings | Implemented through Day 5 |
+| Member lookup, connection creation, Problem Details, OpenAPI, smoke status | Implemented through Day 6 |
+| Candidate generation, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+
+The current checkpoint is **Day 6 complete**. Target-only sections below use
+future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
 
@@ -31,7 +49,7 @@ flowchart LR
         UI[Web/Mobile Client]
     end
 
-    UI -->|GET /pymk/{memberId}| GW[API Gateway / pymk-api]
+    UI -->|"GET /api/v1/pymk/42"| GW["API Gateway / pymk-api"]
 
     GW --> ORCH[Recommendation Orchestrator]
 
@@ -45,7 +63,7 @@ flowchart LR
         L0[L0: Candidate Generation]
         L1[L1: Light Ranker]
         L2[L2: Heavy Ranker]
-        RR[Re-Ranker: Fairness/Diversity]
+        RR["Re-Ranker: Exposure Diversity"]
     end
 
     ORCH --> L0 --> L1 --> L2 --> RR --> ORCH
@@ -62,7 +80,11 @@ flowchart LR
     ORCH --> DB
 ```
 
-Each ranking stage is implemented as a **Spring `@Service` with a well-defined interface**, so it can run in-process for v1 and be extracted to its own Spring Boot microservice + REST/gRPC call later without changing the orchestrator's contract.
+Each ranking stage will be implemented behind a well-defined Java interface and
+run in-process for v1. A later service extraction can replace an implementation
+with REST/gRPC without changing the orchestrator's domain contract. Module
+boundaries are architectural seams, not a requirement to deploy eleven
+microservices.
 
 ---
 
@@ -81,7 +103,7 @@ Each ranking stage is implemented as a **Spring `@Service` with a well-defined i
 | ML alternative (pure Java) | Tribuo (Oracle's Java ML library) or Smile | For a "100% Java" version if avoiding Python entirely is a hard requirement |
 | API | Spring Web (REST), OpenAPI/Swagger | `pymk-api` module |
 | Testing | JUnit5, Testcontainers (Postgres/Redis), Mockito | |
-| Build | Maven multi-module or Gradle multi-module | |
+| Build | Maven multi-module | One parent reactor, Java 21 toolchain |
 | Deployment | Docker Compose (local), optional Kubernetes manifests | |
 | Observability | Micrometer + Prometheus + Grafana | Latency/throughput per stage |
 
@@ -97,10 +119,11 @@ pymk/
 ├── pymk-candidate-gen/      # L0: graph, EBR, heuristic candidate sources
 ├── pymk-light-ranker/       # L1: logistic regression / GBDT scoring
 ├── pymk-heavy-ranker/       # L2: DNN model serving via ONNX Runtime
-├── pymk-reranker/           # fairness, diversity, Bayesian-optimized blending
+├── pymk-reranker/           # exposure diversity, Bayesian-optimized blending
 ├── pymk-orchestrator/       # wires stages together, exposes internal service API
 ├── pymk-api/                # public REST controllers, request/response DTOs
 ├── pymk-batch/               # Spring Batch jobs: ETL, model refresh, graph index build
+├── pymk-datagen/             # one-off synthetic dataset generator for local development
 ├── pymk-ml-training/         # Python project (offline), exports model artifacts
 ├── infra/                    # docker-compose.yml, k8s manifests, init SQL
 └── docs/
@@ -111,7 +134,10 @@ pymk/
 
 ## 5. Data Model (Spring Data JPA)
 
-### 5.1 Core entities
+### 5.1 Implemented and planned entities
+
+`Member`, `Connection`, `MemberEvent`, and `MemberEmbedding` are implemented.
+`PymkPairFeature` is the planned Week 3 feature-store entity.
 
 ```java
 @Entity
@@ -130,8 +156,8 @@ public class Member {
 
 @Entity
 @Table(name = "connections", indexes = {
-    @Index(name = "idx_conn_member", columnList = "memberId"),
-    @Index(name = "idx_conn_connected", columnList = "connectedMemberId")
+    @Index(name = "idx_conn_member", columnList = "member_id"),
+    @Index(name = "idx_conn_connected", columnList = "connected_member_id")
 })
 public class Connection {
     @Id @GeneratedValue
@@ -181,8 +207,16 @@ public class PymkPairFeature {
 
 ### 5.2 Schema notes
 - `connections` is denormalized as a symmetric edge list — trades storage for O(1) adjacency queries, matching how LinkedIn's graph-based candidate generation needs fast n-hop lookups.
-- `member_embeddings` uses **pgvector** so L0's embedding-based retrieval (EBR) source can do an ANN (`<->` cosine distance) query directly in Postgres without a separate vector DB for portfolio scale. Documented upgrade path: Qdrant/Milvus for production scale.
+- `member_embeddings` uses **pgvector** so L0's embedding-based retrieval (EBR) source can do an ANN (`<=>` cosine distance) query directly in Postgres without a separate vector DB for portfolio scale. Documented upgrade path: Qdrant/Milvus for production scale.
 - `pymk_features` is the **feature store** table: precomputed member-candidate pair features refreshed by the nightly Spring Batch ETL job, read by L1/L2 rankers at serving time (avoids expensive joins in the hot path).
+
+### 5.3 Data invariants
+
+- A connection is one logical undirected edge stored as `(A,B)` and `(B,A)` in one transaction. The database enforces foreign keys, no self-edge, and uniqueness per direction; `ConnectionService` owns the two-row invariant.
+- Connection writes use canonical member order internally so simultaneous `(A,B)` and `(B,A)` requests acquire keys consistently rather than deadlocking.
+- API connection creation is idempotent: new edges return `201`, complete existing edges return `200`, and a unique-constraint race returns retryable `409`.
+- Synthetic connections and events never predate either involved member and never occur after the generator's reference time.
+- Embedding retrieval uses cosine distance (`<=>`) with the matching `vector_cosine_ops` HNSW index. `<->` is Euclidean distance and is not interchangeable at the query/index level.
 
 ---
 
@@ -193,11 +227,20 @@ This mirrors the LinkedIn blog's four stages directly.
 ### Stage L0 — Candidate Generation
 **Goal:** reduce full member pool (v1 scale: up to 1M) down to a few thousand candidates. Optimize for **Recall@k**, not precision.
 
-Implemented as a `CandidateSource` interface with three implementations, run in parallel (`CompletableFuture` / virtual threads) and unioned:
+Planned as a `CandidateSource` interface with three implementations, run with
+bounded virtual-thread fan-out and unioned. Sources return provenance rather
+than bare IDs so L1 calibration, debugging, and the explanation endpoint can
+distinguish why a member entered the funnel:
 
 ```java
+public record CandidateHit(
+        long candidateId,
+        CandidateSourceType source,
+        double sourceScore,
+        Map<String, Object> metadata) {}
+
 public interface CandidateSource {
-    List<Long> generate(long memberId, int limit);
+    List<CandidateHit> generate(long memberId, int limit);
 }
 ```
 
@@ -205,7 +248,9 @@ public interface CandidateSource {
 - `EmbeddingRetrievalCandidateSource` — pgvector ANN query against `member_embeddings`.
 - `HeuristicCandidateSource` — same company/school/geo, recently joined members in the same region, etc.
 
-Output: ~2,000–5,000 candidate IDs, cached in Redis per member with short TTL.
+The merge excludes the requesting member and existing first-degree connections,
+de-duplicates by candidate ID while retaining every contributing source, applies
+per-source budgets, and caps the union at roughly 2,000–5,000 candidates.
 
 ### Stage L1 — Light Ranker
 **Goal:** narrow a few thousand candidates to a few hundred. Calibrate scores across the heterogeneous L0 sources so they're comparable. Evaluated by **Recall@k** at k≈500.
@@ -222,11 +267,11 @@ Output: ~2,000–5,000 candidate IDs, cached in Redis per member with short TTL.
 - Batches all candidates for one member into a single ONNX inference call for efficiency.
 
 ### Stage Re-Ranker
-**Goal:** final blending + fairness/diversity constraints, produce the top-N (e.g. 20) shown to the user.
+**Goal:** final blending + exposure-diversity constraints, producing the top-N (e.g. 20) shown to the user.
 
 - Combines L2's multiple predicted probabilities via a weighted linear blend: `score = w1*P(sent) + w2*P(accepted) + ...`
 - Weights `w1, w2...` are tuned offline via **Bayesian optimization** (e.g. a small Python job using `scikit-optimize`, replayed against a held-out logged dataset), then loaded as configuration into `pymk-reranker`.
-- **Fairness pass:** cap the proportion of results from any single dominant cluster (e.g. no more than 40% from the same employer) — implemented as a simple constrained re-sort (greedy Maximal Marginal Relevance–style diversification), which is a well-documented, interview-explainable algorithm.
+- **Exposure-diversity pass:** cap the proportion of results from any single dominant cluster (e.g. no more than 40% from the same employer) using a deterministic constrained re-sort. This improves result diversity but is not, by itself, a protected-attribute fairness guarantee; any fairness claim requires explicit groups, metrics, and evaluation.
 
 ### Orchestration flow
 
@@ -240,7 +285,7 @@ sequenceDiagram
     participant L2 as Heavy Ranker
     participant RR as Re-Ranker
     participant Redis
-    Client->>API: GET /pymk/42
+    Client->>API: GET /api/v1/pymk/42
     API->>Orch: getRecommendations(42)
     Orch->>Redis: check cache
     alt cache miss
@@ -257,6 +302,13 @@ sequenceDiagram
     Orch-->>API: top 20
     API-->>Client: JSON list
 ```
+
+### Cache correctness
+
+- L0 and final-result keys include schema/pipeline/model versions so deployments do not serve structurally stale values.
+- TTL limits staleness, but graph mutations also invalidate affected member keys; TTL is not the only consistency mechanism.
+- Cache failures degrade to the underlying pipeline rather than failing recommendation requests.
+- Cached payloads contain stable DTOs, not JPA entities.
 
 ---
 
@@ -275,14 +327,24 @@ sequenceDiagram
 ## 8. API Design
 
 ```
+GET  /                                                   # smoke status (implemented)
+GET  /actuator/health                                    # dependency-aware health (implemented)
+GET  /api/v1/members/{id}                                # implemented
+POST /api/v1/connections                                 # implemented graph mutation
 GET  /api/v1/pymk/{memberId}?limit=20
 GET  /api/v1/pymk/{memberId}/explain/{candidateId}   # returns feature breakdown, for demo/debugging
 POST /api/v1/events                                   # record invite_sent/accepted/ignored, profile_view
-GET  /api/v1/members/{id}
-POST /api/v1/connections                               # simulate accepting a PYMK suggestion
 ```
 
-`GET /pymk/{memberId}` response:
+API conventions:
+
+- IDs and limits must be positive; malformed or semantically invalid input returns `400`.
+- Missing members return `404`; concurrent uniqueness races return `409`.
+- Errors use RFC 9457 `application/problem+json` with a stable type URI and useful extensions.
+- `POST /connections` mutates the graph only at the current checkpoint. Event ingestion remains a separate future endpoint, avoiding an undocumented synthetic `INVITE_ACCEPTED` event.
+- List endpoints enforce server-side maximum limits even when the client asks for more.
+
+`GET /api/v1/pymk/{memberId}` response:
 ```json
 {
   "memberId": 42,
@@ -304,13 +366,19 @@ Following the blog directly:
 - **L0/L1** → offline metric: **Recall@k**.
 - **L2** → offline metrics: **AUC**, **Precision@k**, **ECE** (calibration).
 - **Re-Ranker** → diversity metrics (e.g. cluster entropy of results) + simulated log-likelihood.
-- **End-to-end** → since this is a portfolio project without real users, simulate an **offline A/B test** using a held-out slice of synthetic interaction logs, comparing "multi-stage pipeline" against a naive baseline (e.g. "mutual-connections-count only"). Report the lift in simulated Recall/CTR as the project's headline result — this is a strong portfolio talking point.
+- **End-to-end** → since this is a portfolio project without real users, run a replay evaluation on a held-out future time window, comparing the multi-stage pipeline against a mutual-connections baseline.
+
+All features must be computed as of a snapshot time, with labels taken only
+from a later window. Random row splits or features computed after an invite was
+accepted would leak the outcome and make reported lift meaningless. Synthetic
+results are labeled as offline replay metrics, not presented as a real online
+A/B test or production CTR lift.
 
 ---
 
 ## 10. Scalability Notes (documented, not all built for v1)
 
-- L0's graph CTE queries work fine to ~1M members / tens of millions of edges on Postgres; beyond that, the documented next step is a dedicated graph store (Neo4j) or in-memory adjacency shards.
+- L0's graph CTE approach is intended for the portfolio-scale dataset; its actual ceiling must be demonstrated with load tests rather than asserted from member count alone. A dedicated graph store or in-memory adjacency shards are later options.
 - Candidate/result caching in Redis keeps p99 latency low for repeat requests; cold-start requests pay the full pipeline cost once.
 - Each stage is stateless and horizontally scalable if split into its own service — the module boundaries in section 4 are drawn specifically so that split is mechanical, not a redesign.
 - Feature store table can be swapped for a real feature store (Feast) without changing the ranker interfaces.
@@ -319,11 +387,11 @@ Following the blog directly:
 
 ## 11. Suggested Build Order (Milestones)
 
-1. **M1 — Core domain**: `pymk-domain` entities, Postgres schema, seed data generator (synthetic members/connections/events).
-2. **M2 — Naive PYMK**: L0 heuristic + graph source only, no ranking, straight to API. Gets an end-to-end skeleton working.
+1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, and error contract. **Current milestone; Day 6 complete.**
+2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API.
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
-5. **M5 — Re-ranker**: blending + fairness diversification.
+5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Batch jobs + scheduling**: Spring Batch jobs for nightly refresh.
 7. **M7 — Observability + offline eval dashboard**: Micrometer/Grafana, Recall@k tracking over time.
 8. **M8 — Polish for portfolio**: Docker Compose one-command startup, README with architecture diagram, sample requests, and a short write-up of the offline A/B result.

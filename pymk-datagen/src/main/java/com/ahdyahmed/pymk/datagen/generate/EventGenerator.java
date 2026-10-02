@@ -31,8 +31,9 @@ public final class EventGenerator {
 
     public List<EventRecord> generate(int memberCount,
                                        List<TimestampedEdge> edges,
-                                       long targetEventCount,
-                                       Instant now) {
+                                       long additionalEventAttempts,
+                                       Instant now,
+                                       Map<Long, Instant> memberCreatedAt) {
         List<EventRecord> events = new ArrayList<>();
 
         // 1) Every accepted connection was preceded by an invite. INVITE_ACCEPTED
@@ -41,6 +42,7 @@ public final class EventGenerator {
             PreferentialAttachmentGraphGenerator.Edge edge = te.edge();
             Instant accepted = te.connectedAt();
             Instant sent = accepted.minus(Duration.ofDays(1 + random.nextInt(14)));
+            sent = later(sent, participantsAvailableAt(edge.memberA(), edge.memberB(), memberCreatedAt));
             events.add(new EventRecord(edge.memberA(), edge.memberB(), EventType.INVITE_SENT, sent));
             events.add(new EventRecord(edge.memberA(), edge.memberB(), EventType.INVITE_ACCEPTED, accepted));
         }
@@ -54,22 +56,28 @@ public final class EventGenerator {
             adjacency.computeIfAbsent(edge.memberB(), k -> new ArrayList<>()).add(edge.memberA());
         }
 
-        long remaining = Math.max(0, targetEventCount - events.size());
-        for (long i = 0; i < remaining; i++) {
+        for (long i = 0; i < additionalEventAttempts; i++) {
             long actor = 1 + random.nextInt(memberCount);
             long target = twoHopCandidate(actor, adjacency, memberCount);
             if (target == actor) {
                 continue;
             }
 
-            Instant occurredAt = randomPastInstant(now, 1, 720);
+            Instant occurredAt = later(
+                    randomPastInstant(now, 1, 720),
+                    participantsAvailableAt(actor, target, memberCreatedAt));
             double r = random.nextDouble();
             if (r < 0.60) {
                 events.add(new EventRecord(actor, target, EventType.PROFILE_VIEW, occurredAt));
             } else if (r < 0.85) {
                 events.add(new EventRecord(actor, target, EventType.SEARCH_APPEARANCE, occurredAt));
             } else {
+                // A recent invite may not yet have had ten days to be ignored;
+                // generated history must never extend beyond the run's clock.
                 Instant ignoredAt = occurredAt.plus(Duration.ofDays(1 + random.nextInt(10)));
+                if (ignoredAt.isAfter(now)) {
+                    ignoredAt = now;
+                }
                 events.add(new EventRecord(actor, target, EventType.INVITE_SENT, occurredAt));
                 events.add(new EventRecord(actor, target, EventType.INVITE_IGNORED, ignoredAt));
             }
@@ -93,5 +101,19 @@ public final class EventGenerator {
         int span = Math.max(1, maxDaysAgo - minDaysAgo);
         int days = minDaysAgo + random.nextInt(span);
         return now.minus(Duration.ofDays(days));
+    }
+
+    private static Instant participantsAvailableAt(
+            long first, long second, Map<Long, Instant> memberCreatedAt) {
+        Instant firstCreatedAt = memberCreatedAt.get(first);
+        Instant secondCreatedAt = memberCreatedAt.get(second);
+        if (firstCreatedAt == null || secondCreatedAt == null) {
+            throw new IllegalArgumentException("Missing member creation timestamp for generated event");
+        }
+        return later(firstCreatedAt, secondCreatedAt);
+    }
+
+    private static Instant later(Instant left, Instant right) {
+        return left.isAfter(right) ? left : right;
     }
 }

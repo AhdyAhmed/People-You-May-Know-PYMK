@@ -1,5 +1,6 @@
 package com.ahdyahmed.pymk.domain.support;
 
+import com.ahdyahmed.pymk.domain.repository.EmbeddingSearchRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
@@ -21,8 +22,8 @@ import org.springframework.context.annotation.Import;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@DataJpaTest
+@DataJpaTest(showSql = false)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({PostgresTestConfig.class, ConnectionService.class})
+@Import({PostgresTestConfig.class, ConnectionService.class, EmbeddingSearchRepository.class})
 public @interface PostgresDataJpaTest {
 }

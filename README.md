@@ -4,10 +4,10 @@ A portfolio-scale reimplementation of LinkedIn-style **"People You May Know"**
 recommendations, built on the Java/Spring ecosystem, following the
 multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
-ranking (L2) → re-ranking (fairness/diversity)**.
+ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 6 of 30 (Part 2 of 3 done)** — repo, multi-module build, core JPA entities,
-> repositories, the synthetic data generator, and pgvector embeddings are up.
+> 🚧 **Status: Day 6 of 30 complete** — repo, multi-module build, core JPA entities,
+> repositories, the synthetic data generator, pgvector embeddings, and the initial REST API are up.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -24,10 +24,15 @@ demonstrates both sides of a modern recommendation system:
   microservices without a rewrite.
 - **Applied ML engineering:** feature engineering, offline model training
   (logistic regression → GBDT → small NN), ONNX/PMML serving from Java,
-  offline evaluation (Recall@k, AUC, Precision@k, calibration), and a
-  simulated offline A/B test against a naive baseline.
+  offline evaluation (Recall@k, AUC, Precision@k, calibration), and temporal
+  replay against a naive baseline. These are offline results, not an A/B test.
 
-## Architecture
+## Target architecture
+
+The diagram is the end-state funnel. At the current Day 6 checkpoint, the
+domain, data generator, embeddings, and initial API are implemented; L0–L2,
+the orchestrator, Redis caching, and re-ranking are scheduled later in the
+roadmap and their modules are intentionally skeletal.
 
 ```mermaid
 flowchart LR
@@ -35,14 +40,14 @@ flowchart LR
         UI[Web/Mobile Client]
     end
 
-    UI -->|"GET /pymk/{memberId}"| GW[pymk-api]
+    UI -->|"GET /api/v1/pymk/42"| GW[pymk-api]
     GW --> ORCH[Orchestrator]
 
     subgraph Online["Online Serving Pipeline"]
         L0[L0: Candidate Generation]
         L1[L1: Light Ranker]
         L2[L2: Heavy Ranker]
-        RR[Re-Ranker: Fairness/Diversity]
+        RR[Re-Ranker: Exposure Diversity]
     end
 
     ORCH --> L0 --> L1 --> L2 --> RR --> ORCH
@@ -82,7 +87,7 @@ pymk/
 ├── pymk-candidate-gen/     # L0: graph, EBR, heuristic candidate sources
 ├── pymk-light-ranker/      # L1: logistic regression / GBDT scoring
 ├── pymk-heavy-ranker/      # L2: DNN model serving via ONNX Runtime
-├── pymk-reranker/          # fairness, diversity, Bayesian-tuned blending
+├── pymk-reranker/          # exposure diversity, Bayesian-tuned blending
 ├── pymk-orchestrator/      # wires stages together
 ├── pymk-api/               # public REST controllers (the runnable app)
 ├── pymk-batch/             # Spring Batch jobs
@@ -92,7 +97,7 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 5; the rest are
+`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 6; the rest are
 still intentionally empty — Day 1's job was to get the wiring, dependency
 graph, and package layout right before logic lands module by module. See the
 roadmap for what fills in each module and when.
@@ -109,11 +114,11 @@ cd People-You-May-Know-PYMK
 # 2. Start Postgres (with pgvector) + Redis
 docker compose -f infra/docker-compose.yml up -d
 
-# 3. Build all modules
-mvn -B verify
+# 3. Build and install all modules (Docker is used by integration tests)
+mvn -B install
 
 # 4. Seed a synthetic dataset (~100K members by default; see pymk-datagen/README.md)
-mvn -pl pymk-datagen -am spring-boot:run
+mvn -pl pymk-datagen spring-boot:run
 
 # 5. Run the API
 mvn -pl pymk-api spring-boot:run
@@ -122,14 +127,39 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M1 - Day 1: repo & environment setup"}
+# {"service":"pymk-api","status":"up","milestone":"M1 - Day 6: API skeleton complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl -X POST http://localhost:8080/api/v1/connections \
   -H 'Content-Type: application/json' \
   -d '{"memberId": 42, "connectedMemberId": 981}'   # Day 6, Part 2
-open http://localhost:8080/swagger-ui.html        # interactive API docs
+# Browse to http://localhost:8080/swagger-ui.html for interactive API docs
 ```
+
+## API (Day 6)
+
+`GET /api/v1/members/{id}` accepts a positive member ID and returns a profile
+and its first-degree connection count:
+
+```json
+{
+  "id": 42,
+  "fullName": "Ada Lovelace",
+  "headline": "Senior Software Engineer",
+  "company": "Acme Corp",
+  "school": "MIT",
+  "geoRegion": "Cairo",
+  "connectionCount": 137,
+  "createdAt": "2026-01-15T10:00:00Z"
+}
+```
+
+`POST /api/v1/connections` stores both directions of the undirected graph edge;
+event ingestion is a separate future endpoint. It returns
+`201` with `created: true` for a new connection and `200` with `created: false` when
+the pair is already connected. Validation and domain failures use RFC 9457
+`application/problem+json` responses. The live OpenAPI document is available at
+`/v3/api-docs`, with Swagger UI at `/swagger-ui.html`.
 
 ## Tests
 
@@ -151,7 +181,7 @@ To stop the local infra: `docker compose -f infra/docker-compose.yml down`
 This project is being built in public, one focused session at a time. Each
 day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 
-- [x] **Day 1 — Repo & environment setup**: multi-module Maven skeleton (10
+- [x] **Day 1 — Repo & environment setup**: multi-module Maven skeleton (11
       modules), Docker Compose (Postgres + pgvector, Redis), CI build.
 - [x] **Day 2 — Core JPA entities**: `Member`, `Connection`, `MemberEvent` (+
       `EventType`) in `pymk-domain`, with a Flyway migration for the schema
@@ -174,13 +204,13 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       via `EmbeddingSearchRepository`, placeholder random vectors from
       `pymk-datagen`, and a test proving the ANN query returns
       semantically-sensible neighbors on constructed clusters.
-- [ ] **Day 6 — `pymk-api` skeleton** *(in progress, built in 3 parts)*
+- [x] **Day 6 — `pymk-api` skeleton** *(built in 3 parts)*
   - [x] Part 1 — springdoc OpenAPI + Swagger UI, `GET /api/v1/members/{id}`,
         RFC 9457 `ProblemDetail` error handling, MockMvc + Testcontainers tests.
   - [x] Part 2 — `POST /api/v1/connections`: Bean Validation, idempotent
         (201 created / 200 already connected), 400 self-connect, 404 unknown
         member, 409 on the unique-constraint race.
-  - [ ] Part 3 — polish: status endpoint, README API section, end-to-end test.
+  - [x] Part 3 — polish: status endpoint, README API section, end-to-end test.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

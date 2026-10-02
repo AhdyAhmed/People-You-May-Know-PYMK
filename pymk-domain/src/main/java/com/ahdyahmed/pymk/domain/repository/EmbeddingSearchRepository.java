@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * ANN (approximate nearest neighbor) queries over member_embeddings using
- * pgvector's {@code <->} (cosine distance, given {@code vector_cosine_ops})
+ * pgvector's {@code <=>} cosine-distance operator
  * operator. Backs {@code EmbeddingRetrievalCandidateSource} (Day 9).
  *
  * <p>Plain JdbcTemplate rather than a Spring Data {@code @Query}: the
@@ -35,7 +35,7 @@ public class EmbeddingSearchRepository {
                 FROM member_embeddings e1
                 JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
-                ORDER BY e1.embedding <-> e2.embedding
+                ORDER BY e1.embedding <=> e2.embedding
                 LIMIT ?
                 """, Long.class, memberId, limit);
     }
@@ -53,14 +53,14 @@ public class EmbeddingSearchRepository {
                     SELECT member_id
                     FROM member_embeddings
                     WHERE member_id <> ?
-                    ORDER BY embedding <-> CAST(? AS vector)
+                    ORDER BY embedding <=> CAST(? AS vector)
                     LIMIT ?
                     """, Long.class, excludeMemberId, literal, limit);
         }
         return jdbc.queryForList("""
                 SELECT member_id
                 FROM member_embeddings
-                ORDER BY embedding <-> CAST(? AS vector)
+                ORDER BY embedding <=> CAST(? AS vector)
                 LIMIT ?
                 """, Long.class, literal, limit);
     }

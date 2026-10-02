@@ -17,7 +17,7 @@ pymk:
   datagen:
     members: 100000
     avg-degree: 12
-    events-per-member: 6.0
+    events-per-member: 2.0
     seed: 42
     truncate-existing: true
     organization-pool-size: 250

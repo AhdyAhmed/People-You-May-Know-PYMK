@@ -8,6 +8,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,40 +37,46 @@ public class BulkLoader {
     }
 
     public void insertMembers(List<MemberRecord> members) {
-        List<Object[]> rows = new ArrayList<>(members.size());
-        for (MemberRecord m : members) {
-            rows.add(new Object[] {
-                    m.id(), m.fullName(), m.headline(), m.company(), m.school(),
-                    m.geoRegion(), Timestamp.from(m.createdAt())
-            });
-        }
-        executeBatched(
+        executeMappedBatches(
                 "INSERT INTO members (id, full_name, headline, company, school, geo_region, created_at) "
                         + "VALUES (?,?,?,?,?,?,?)",
-                rows, "members");
+                members,
+                m -> new Object[] {
+                    m.id(), m.fullName(), m.headline(), m.company(), m.school(),
+                    m.geoRegion(), Timestamp.from(m.createdAt())
+                },
+                "members");
     }
 
     /** Writes both directed rows per undirected edge, matching the symmetric edge-list schema. */
     public void insertConnections(List<TimestampedEdge> edges) {
-        List<Object[]> rows = new ArrayList<>(edges.size() * 2);
+        String sql = "INSERT INTO connections (member_id, connected_member_id, connected_at) VALUES (?,?,?)";
+        int total = edges.size() * 2;
+        int done = 0;
+        List<Object[]> rows = new ArrayList<>(BATCH_SIZE);
         for (TimestampedEdge te : edges) {
             Timestamp ts = Timestamp.from(te.connectedAt());
             rows.add(new Object[] {te.edge().memberA(), te.edge().memberB(), ts});
             rows.add(new Object[] {te.edge().memberB(), te.edge().memberA(), ts});
+            if (rows.size() >= BATCH_SIZE) {
+                done += flush(sql, rows);
+                log.info("  connections: {}/{} rows", done, total);
+            }
         }
-        executeBatched(
-                "INSERT INTO connections (member_id, connected_member_id, connected_at) VALUES (?,?,?)",
-                rows, "connections");
+        if (!rows.isEmpty()) {
+            done += flush(sql, rows);
+            log.info("  connections: {}/{} rows", done, total);
+        }
     }
 
     public void insertEvents(List<EventRecord> events) {
-        List<Object[]> rows = new ArrayList<>(events.size());
-        for (EventRecord e : events) {
-            rows.add(new Object[] {e.actorMemberId(), e.targetMemberId(), e.type().name(), Timestamp.from(e.occurredAt())});
-        }
-        executeBatched(
+        executeMappedBatches(
                 "INSERT INTO member_events (actor_member_id, target_member_id, type, occurred_at) VALUES (?,?,?,?)",
-                rows, "member_events");
+                events,
+                e -> new Object[] {
+                    e.actorMemberId(), e.targetMemberId(), e.type().name(), Timestamp.from(e.occurredAt())
+                },
+                "member_events");
     }
 
     /**
@@ -79,26 +86,38 @@ public class BulkLoader {
      * type registration.
      */
     public void insertEmbeddings(List<MemberEmbeddingRecord> embeddings) {
-        List<Object[]> rows = new ArrayList<>(embeddings.size());
-        for (MemberEmbeddingRecord e : embeddings) {
-            rows.add(new Object[] {e.memberId(), VectorLiterals.toLiteral(e.embedding()), Timestamp.from(e.updatedAt())});
-        }
-        executeBatched(
+        executeMappedBatches(
                 "INSERT INTO member_embeddings (member_id, embedding, updated_at) VALUES (?, CAST(? AS vector), ?)",
-                rows, "member_embeddings");
+                embeddings,
+                e -> new Object[] {
+                    e.memberId(), VectorLiterals.toLiteral(e.embedding()), Timestamp.from(e.updatedAt())
+                },
+                "member_embeddings");
     }
 
     public record MemberEmbeddingRecord(long memberId, float[] embedding, Instant updatedAt) {
     }
 
-    private void executeBatched(String sql, List<Object[]> rows, String label) {
-        int total = rows.size();
+    private <T> void executeMappedBatches(
+            String sql, List<T> source, Function<T, Object[]> rowMapper, String label) {
+        int total = source.size();
         int done = 0;
         for (int start = 0; start < total; start += BATCH_SIZE) {
             int end = Math.min(start + BATCH_SIZE, total);
-            jdbc.batchUpdate(sql, rows.subList(start, end));
+            List<Object[]> rows = new ArrayList<>(end - start);
+            for (int i = start; i < end; i++) {
+                rows.add(rowMapper.apply(source.get(i)));
+            }
+            jdbc.batchUpdate(sql, rows);
             done = end;
             log.info("  {}: {}/{} rows", label, done, total);
         }
+    }
+
+    private int flush(String sql, List<Object[]> rows) {
+        int size = rows.size();
+        jdbc.batchUpdate(sql, rows);
+        rows.clear();
+        return size;
     }
 }

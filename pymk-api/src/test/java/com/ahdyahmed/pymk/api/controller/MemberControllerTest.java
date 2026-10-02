@@ -78,4 +78,12 @@ class MemberControllerTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(400));
     }
+
+    @Test
+    void nonPositiveIdIsProblemDetail400() throws Exception {
+        mvc.perform(get("/api/v1/members/0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(400));
+    }
 }

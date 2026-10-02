@@ -17,7 +17,9 @@ import com.ahdyahmed.pymk.datagen.report.SummaryReporter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
 import net.datafaker.Faker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +53,7 @@ public class SeedRunner implements CommandLineRunner {
     @Override
     public void run(String... args) {
         long overallStart = System.nanoTime();
-        log.info("Starting PYMK synthetic data generation: members={} avgDegree={} eventsPerMember={} seed={}",
+        log.info("Starting PYMK synthetic data generation: members={} avgDegree={} extraEventsPerMember={} seed={}",
                 props.getMembers(), props.getAvgDegree(), props.getEventsPerMember(), props.getSeed());
 
         Random masterRandom = new Random(props.getSeed());
@@ -79,18 +81,22 @@ public class SeedRunner implements CommandLineRunner {
             return result;
         });
         timed("Loading members", () -> loader.insertMembers(members));
+        Map<Long, Instant> memberCreatedAt = members.stream().collect(Collectors.toMap(
+                MemberRecord::id, MemberRecord::createdAt, (left, right) -> left));
 
         List<Edge> edges = timed("Generating connection graph (preferential attachment)", () -> {
             int edgesPerNewMember = Math.max(1, props.getAvgDegree() / 2);
             return new PreferentialAttachmentGraphGenerator(edgesPerNewMember, graphRandom).generate(props.getMembers());
         });
         List<TimestampedEdge> timestampedEdges = timed("Assigning connection timestamps", () ->
-                new ConnectionTimelineGenerator(timelineRandom).assignTimestamps(edges, now, 720));
+                new ConnectionTimelineGenerator(timelineRandom)
+                        .assignTimestamps(edges, now, 720, memberCreatedAt));
         timed("Loading connections", () -> loader.insertConnections(timestampedEdges));
 
-        long targetEventCount = Math.round(props.getMembers() * props.getEventsPerMember());
+        long additionalEventAttempts = Math.round(props.getMembers() * props.getEventsPerMember());
         List<EventRecord> events = timed("Generating events", () ->
-                new EventGenerator(eventRandom).generate(props.getMembers(), timestampedEdges, targetEventCount, now));
+                new EventGenerator(eventRandom).generate(
+                        props.getMembers(), timestampedEdges, additionalEventAttempts, now, memberCreatedAt));
         timed("Loading events", () -> loader.insertEvents(events));
 
         List<MemberEmbeddingRecord> embeddingRows = timed("Generating placeholder embeddings", () -> {

@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 /**
  * Plain CRUD on member_embeddings via JPA (Hibernate's vector module handles
  * the float[] &lt;-&gt; pgvector mapping). ANN similarity search lives
- * separately in {@link EmbeddingSearchRepository}, since the {@code <->}
+ * separately in {@link EmbeddingSearchRepository}, since the {@code <=>}
  * operator isn't something a derived-query or simple {@code @Query} method
  * expresses cleanly.
  */

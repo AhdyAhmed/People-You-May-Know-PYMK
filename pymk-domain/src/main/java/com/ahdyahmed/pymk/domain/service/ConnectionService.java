@@ -35,13 +35,18 @@ public class ConnectionService {
         if (memberA == memberB) {
             throw new IllegalArgumentException("A member cannot connect to themselves: " + memberA);
         }
+        // Always touch the two directed rows in the same order. Without this,
+        // simultaneous (A,B) and (B,A) requests can lock opposite unique-index
+        // entries and deadlock even though they represent the same connection.
+        long first = Math.min(memberA, memberB);
+        long second = Math.max(memberA, memberB);
         boolean created = false;
-        if (!connections.existsByMemberIdAndConnectedMemberId(memberA, memberB)) {
-            connections.save(new Connection(memberA, memberB, connectedAt));
+        if (!connections.existsByMemberIdAndConnectedMemberId(first, second)) {
+            connections.save(new Connection(first, second, connectedAt));
             created = true;
         }
-        if (!connections.existsByMemberIdAndConnectedMemberId(memberB, memberA)) {
-            connections.save(new Connection(memberB, memberA, connectedAt));
+        if (!connections.existsByMemberIdAndConnectedMemberId(second, first)) {
+            connections.save(new Connection(second, first, connectedAt));
             created = true;
         }
         return created;
@@ -50,7 +55,9 @@ public class ConnectionService {
     /** Removes both directions of the edge. */
     @Transactional
     public void disconnect(long memberA, long memberB) {
-        connections.deleteByMemberIdAndConnectedMemberId(memberA, memberB);
-        connections.deleteByMemberIdAndConnectedMemberId(memberB, memberA);
+        long first = Math.min(memberA, memberB);
+        long second = Math.max(memberA, memberB);
+        connections.deleteByMemberIdAndConnectedMemberId(first, second);
+        connections.deleteByMemberIdAndConnectedMemberId(second, first);
     }
 }

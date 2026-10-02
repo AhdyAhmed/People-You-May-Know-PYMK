@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * Backs the Day 5 roadmap claim: "Confirm an ANN query (the {@code <->}
+ * Backs the Day 5 roadmap claim: "Confirm an ANN query (the {@code <=>}
  * operator) runs and returns sensible neighbors." Builds two well-separated
  * clusters of embeddings and checks that ANN search for a member in cluster
  * A returns mostly other cluster-A members - a much stronger claim than

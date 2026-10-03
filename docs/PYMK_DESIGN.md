@@ -34,9 +34,10 @@ status differ.
 | Core entities, Flyway schema, repositories, symmetric connection service | Implemented through Day 3 |
 | Synthetic members, graph, temporally valid events, placeholder embeddings | Implemented through Day 5 |
 | Member lookup, connection creation, Problem Details, OpenAPI, smoke status | Implemented through Day 6 |
+| Foundation audit and documented data-model/seeding runbook | Implemented on Day 7 |
 | Candidate generation, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 6 complete**. Target-only sections below use
+The current checkpoint is **Day 7 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -387,7 +388,7 @@ A/B test or production CTR lift.
 
 ## 11. Suggested Build Order (Milestones)
 
-1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, and error contract. **Current milestone; Day 6 complete.**
+1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API.
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.

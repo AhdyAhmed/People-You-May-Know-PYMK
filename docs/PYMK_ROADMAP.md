@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 6 complete; Day 7 is next. Target-architecture
+**Current checkpoint:** Day 7 complete; Day 8 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -43,9 +43,9 @@ alone does not mark a day complete when the behavior can be automated.
 - OpenAPI/Swagger UI wired up.
 - *Built in 3 parts:* **(1)** OpenAPI/Swagger + `GET /members/{id}` + error handling ✅ · **(2)** `POST /connections` ✅ · **(3)** status/API documentation + end-to-end test ✅.
 
-**Day 7 — Buffer / catch-up + write-up**
-- Fix anything slipped from Days 1–6.
-- Write the first README section: "Data model & how to seed the DB."
+**Day 7 — Buffer / catch-up + write-up ✅**
+- Audited Days 1–6 and reconciled the live milestone, roadmap, design, and README status.
+- Added the root README section "Data model & how to seed the DB," including invariants, safe reset behavior, configuration overrides, and verification commands.
 
 ---
 

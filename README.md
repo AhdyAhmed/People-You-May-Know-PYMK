@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 6 of 30 complete** — repo, multi-module build, core JPA entities,
+> 🚧 **Status: Day 7 of 30 complete** — repo, multi-module build, core JPA entities,
 > repositories, the synthetic data generator, pgvector embeddings, and the initial REST API are up.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 6 checkpoint, the
+The diagram is the end-state funnel. At the current Day 7 checkpoint, the
 domain, data generator, embeddings, and initial API are implemented; L0–L2,
 the orchestrator, Redis caching, and re-ranking are scheduled later in the
 roadmap and their modules are intentionally skeletal.
@@ -97,10 +97,61 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 6; the rest are
+`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 7; the rest are
 still intentionally empty — Day 1's job was to get the wiring, dependency
 graph, and package layout right before logic lands module by module. See the
 roadmap for what fills in each module and when.
+
+## Data model & how to seed the DB
+
+Flyway migrations are the database schema source of truth; Hibernate validates
+the entity mappings against them instead of creating or changing tables.
+
+| Table | Purpose | Important invariant |
+|---|---|---|
+| `members` | Member profile and heuristic attributes | IDs come from the generator/upstream identity system; they are not database-generated |
+| `connections` | First-degree graph adjacency | One undirected connection is stored as two directed rows; self-edges and duplicate directions are rejected |
+| `member_events` | Timestamped profile, search, and invite activity | Actor and target must exist; generated invite lifecycles are temporally ordered |
+| `member_embeddings` | One 128-dimensional pgvector embedding per member | Uses an HNSW cosine index; Day 5–7 vectors are random normalized placeholders |
+
+`ConnectionService` owns the two-row connection invariant and writes both
+directions in one transaction. Application code should not create a single
+`connections` row directly.
+
+To create a local database and seed it from a clean checkout:
+
+```bash
+# Start Postgres; Redis is not required by the generator yet.
+docker compose -f infra/docker-compose.yml up -d postgres
+
+# Build the generator and the modules it depends on.
+mvn -B -pl pymk-datagen -am package -DskipTests
+
+# Fast local dataset (20,000 members).
+java -jar pymk-datagen/target/pymk-datagen.jar --pymk.datagen.members=20000
+
+# Omit the override for the default 100,000-member dataset.
+# java -jar pymk-datagen/target/pymk-datagen.jar
+```
+
+The seed defaults to `42`, so profiles and graph topology are reproducible for
+the same member count. Timestamps are relative to the run time. The generator
+prints row counts, degree percentiles, popular organizations, and event counts
+when it finishes. You can independently inspect the loaded tables with:
+
+```bash
+docker exec pymk-postgres psql -U pymk -d pymk -c "SELECT 'members' AS table_name, count(*) FROM members UNION ALL SELECT 'connections', count(*) FROM connections UNION ALL SELECT 'member_events', count(*) FROM member_events UNION ALL SELECT 'member_embeddings', count(*) FROM member_embeddings;"
+```
+
+> **Reset behavior:** seeding truncates all four generated-data tables by
+> default. This is controlled by `--pymk.datagen.truncate-existing=false`, but
+> disabling truncation is not an append mode: generated IDs restart at `1` and
+> will conflict with an existing generated dataset. PostgreSQL data persists in
+> the `pymk_postgres_data` Docker volume; `docker compose -f
+> infra/docker-compose.yml down -v` deliberately removes it.
+
+All generator options and their defaults are documented in
+[`pymk-datagen/README.md`](pymk-datagen/README.md).
 
 ## Quickstart
 
@@ -127,7 +178,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M1 - Day 6: API skeleton complete"}
+# {"service":"pymk-api","status":"up","milestone":"M1 - Day 7: foundation complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl -X POST http://localhost:8080/api/v1/connections \
@@ -211,6 +262,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
         (201 created / 200 already connected), 400 self-connect, 404 unknown
         member, 409 on the unique-constraint race.
   - [x] Part 3 — polish: status endpoint, README API section, end-to-end test.
+- [x] **Day 7 — Buffer / catch-up + write-up**: audited the completed M1
+      foundation, synchronized the live milestone and planning documents, and
+      added the data-model and database-seeding runbook.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

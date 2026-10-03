@@ -20,7 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-/** A Day 6 smoke journey through the public API and the real migrated database. */
+/** An M1 smoke journey through the public API and the real migrated database. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
@@ -44,7 +44,7 @@ class ApiEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.service").value("pymk-api"))
                 .andExpect(jsonPath("$.status").value("up"))
-                .andExpect(jsonPath("$.milestone").value("M1 - Day 6: API skeleton complete"));
+                .andExpect(jsonPath("$.milestone").value("M1 - Day 7: foundation complete"));
 
         mvc.perform(get("/api/v1/members/{id}", MEMBER_ID))
                 .andExpect(status().isOk())

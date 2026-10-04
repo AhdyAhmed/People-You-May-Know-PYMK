@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 7 complete; Day 8 is next. Target-architecture
+**Current checkpoint:** Day 8 complete; Day 9 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -51,10 +51,10 @@ alone does not mark a day complete when the behavior can be automated.
 
 ## Week 2 — Naive End-to-End PYMK (M2)
 
-**Day 8 — `CandidateSource` interface**
-- Define a `CandidateSource` contract in `pymk-candidate-gen` that returns candidate ID, source type, and source-local score/metadata rather than bare IDs.
-- Implement `HeuristicCandidateSource` (same company/school/geo) first — simplest to reason about and test.
-- Apply shared eligibility rules: exclude the requesting member, existing connections, duplicates, and invalid/deleted members.
+**Day 8 — `CandidateSource` interface ✅**
+- Added the `CandidateSource` contract and immutable `CandidateHit` carrying candidate ID, source type, source-local score, and string metadata.
+- Implemented deterministic `HeuristicCandidateSource` ranking exact company/school/geo matches by match strength, then member ID.
+- Added a shared batched eligibility policy that excludes self, existing connections, duplicates, and missing/deleted members, with real-Postgres integration tests.
 
 **Day 9 — Graph-walk + embedding candidate sources**
 - Implement `GraphWalkCandidateSource` using a recursive CTE (2-hop, 3-hop neighbors) over `connections`.

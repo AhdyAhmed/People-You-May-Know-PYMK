@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 7 of 30 complete** — repo, multi-module build, core JPA entities,
-> repositories, the synthetic data generator, pgvector embeddings, and the initial REST API are up.
+> 🚧 **Status: Day 8 of 30 complete** — the M1 foundation is complete and M2
+> now has its candidate contract, shared eligibility policy, and first heuristic source.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,10 +29,10 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 7 checkpoint, the
-domain, data generator, embeddings, and initial API are implemented; L0–L2,
-the orchestrator, Redis caching, and re-ranking are scheduled later in the
-roadmap and their modules are intentionally skeletal.
+The diagram is the end-state funnel. At the current Day 8 checkpoint, the
+domain, data generator, embeddings, initial API, and heuristic L0 source are
+implemented. Graph/embedding candidate sources, L1–L2, the orchestrator,
+Redis caching, and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -97,10 +97,9 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, and `pymk-datagen` have real content as of Day 7; the rest are
-still intentionally empty — Day 1's job was to get the wiring, dependency
-graph, and package layout right before logic lands module by module. See the
-roadmap for what fills in each module and when.
+`pymk-domain`, `pymk-api`, `pymk-datagen`, and `pymk-candidate-gen` have real
+content as of Day 8. The remaining implementation modules are intentionally
+skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
 
@@ -112,7 +111,7 @@ the entity mappings against them instead of creating or changing tables.
 | `members` | Member profile and heuristic attributes | IDs come from the generator/upstream identity system; they are not database-generated |
 | `connections` | First-degree graph adjacency | One undirected connection is stored as two directed rows; self-edges and duplicate directions are rejected |
 | `member_events` | Timestamped profile, search, and invite activity | Actor and target must exist; generated invite lifecycles are temporally ordered |
-| `member_embeddings` | One 128-dimensional pgvector embedding per member | Uses an HNSW cosine index; Day 5–7 vectors are random normalized placeholders |
+| `member_embeddings` | One 128-dimensional pgvector embedding per member | Uses an HNSW cosine index; current vectors are random normalized placeholders |
 
 `ConnectionService` owns the two-row connection invariant and writes both
 directions in one transaction. Application code should not create a single
@@ -178,7 +177,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M1 - Day 7: foundation complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 8: heuristic candidate source complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl -X POST http://localhost:8080/api/v1/connections \
@@ -211,6 +210,20 @@ event ingestion is a separate future endpoint. It returns
 the pair is already connected. Validation and domain failures use RFC 9457
 `application/problem+json` responses. The live OpenAPI document is available at
 `/v3/api-docs`, with Swagger UI at `/swagger-ui.html`.
+
+## Candidate generation (Day 8)
+
+`pymk-candidate-gen` now defines the internal L0 `CandidateSource` contract.
+Each `CandidateHit` includes a candidate ID, stable source type, source-local
+score, and immutable explanation metadata rather than returning a bare ID.
+
+The first implementation, `HeuristicCandidateSource`, retrieves exact
+company, school, and geographic-region matches. It sorts by the number of
+matching available attributes and then member ID, making limits deterministic.
+Its shared eligibility policy removes the requesting member, current
+connections, duplicates, and IDs that no longer exist. This is an internal
+module API; the public PYMK endpoint arrives on Day 11 after the remaining L0
+sources and union are implemented.
 
 ## Tests
 
@@ -265,6 +278,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 7 — Buffer / catch-up + write-up**: audited the completed M1
       foundation, synchronized the live milestone and planning documents, and
       added the data-model and database-seeding runbook.
+- [x] **Day 8 — Candidate source contract + heuristic retrieval**:
+      provenance-preserving `CandidateHit`, deterministic company/school/geo
+      retrieval, shared eligibility filtering, and database-backed tests.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

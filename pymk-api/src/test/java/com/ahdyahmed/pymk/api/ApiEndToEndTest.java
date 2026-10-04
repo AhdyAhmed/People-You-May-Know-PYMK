@@ -44,7 +44,8 @@ class ApiEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.service").value("pymk-api"))
                 .andExpect(jsonPath("$.status").value("up"))
-                .andExpect(jsonPath("$.milestone").value("M1 - Day 7: foundation complete"));
+                .andExpect(jsonPath("$.milestone")
+                        .value("M2 - Day 8: heuristic candidate source complete"));
 
         mvc.perform(get("/api/v1/members/{id}", MEMBER_ID))
                 .andExpect(status().isOk())

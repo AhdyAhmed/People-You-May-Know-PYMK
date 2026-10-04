@@ -14,7 +14,7 @@
   <artifactId>pymk-domain</artifactId>
   <packaging>jar</packaging>
   <name>pymk-domain</name>
-  <description>JPA entities and Spring Data repositories for members, connections, events, embeddings, and pair features.</description>
+  <description>JPA entities and Spring Data repositories for members, connections, events, and embeddings.</description>
 
   <dependencies>
     <dependency>

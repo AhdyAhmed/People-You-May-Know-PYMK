@@ -35,9 +35,10 @@ status differ.
 | Synthetic members, graph, temporally valid events, placeholder embeddings | Implemented through Day 5 |
 | Member lookup, connection creation, Problem Details, OpenAPI, smoke status | Implemented through Day 6 |
 | Foundation audit and documented data-model/seeding runbook | Implemented on Day 7 |
-| Candidate generation, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Candidate contract, heuristic source, shared eligibility policy | Implemented on Day 8 |
+| Graph/embedding sources, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 7 complete**. Target-only sections below use
+The current checkpoint is **Day 8 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -228,30 +229,34 @@ This mirrors the LinkedIn blog's four stages directly.
 ### Stage L0 — Candidate Generation
 **Goal:** reduce full member pool (v1 scale: up to 1M) down to a few thousand candidates. Optimize for **Recall@k**, not precision.
 
-Planned as a `CandidateSource` interface with three implementations, run with
-bounded virtual-thread fan-out and unioned. Sources return provenance rather
-than bare IDs so L1 calibration, debugging, and the explanation endpoint can
-distinguish why a member entered the funnel:
+The `CandidateSource` contract and heuristic implementation are complete as of
+Day 8. Graph and embedding implementations follow on Day 9; Day 10 runs the
+three sources with bounded virtual-thread fan-out and unions them. Sources
+return provenance rather than bare IDs so L1 calibration, debugging, and the
+explanation endpoint can distinguish why a member entered the funnel:
 
 ```java
 public record CandidateHit(
         long candidateId,
         CandidateSourceType source,
         double sourceScore,
-        Map<String, Object> metadata) {}
+        Map<String, String> metadata) {}
 
 public interface CandidateSource {
+    CandidateSourceType type();
     List<CandidateHit> generate(long memberId, int limit);
 }
 ```
 
 - `GraphWalkCandidateSource` — recursive CTE over `connections` to fetch 2-hop, 3-hop neighbors ("friends of friends").
 - `EmbeddingRetrievalCandidateSource` — pgvector ANN query against `member_embeddings`.
-- `HeuristicCandidateSource` — same company/school/geo, recently joined members in the same region, etc.
+- `HeuristicCandidateSource` — **implemented**; exact company/school/geo matches, scored by the fraction of the requester's available profile attributes that match. Results are ordered by match strength and then member ID for deterministic limits.
 
-The merge excludes the requesting member and existing first-degree connections,
-de-duplicates by candidate ID while retaining every contributing source, applies
-per-source budgets, and caps the union at roughly 2,000–5,000 candidates.
+Every source applies the shared eligibility policy, which excludes the requesting
+member, existing first-degree connections, duplicate hits within that source,
+and member IDs that no longer exist. The Day 10 merge de-duplicates across
+sources while retaining every source's provenance, applies per-source budgets,
+and caps the union at roughly 2,000–5,000 candidates.
 
 ### Stage L1 — Light Ranker
 **Goal:** narrow a few thousand candidates to a few hundred. Calibrate scores across the heterogeneous L0 sources so they're comparable. Evaluated by **Recall@k** at k≈500.

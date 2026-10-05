@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 8 complete; Day 9 is next. Target-architecture
+**Current checkpoint:** Day 9 complete; Day 10 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -56,10 +56,10 @@ alone does not mark a day complete when the behavior can be automated.
 - Implemented deterministic `HeuristicCandidateSource` ranking exact company/school/geo matches by match strength, then member ID.
 - Added a shared batched eligibility policy that excludes self, existing connections, duplicates, and missing/deleted members, with real-Postgres integration tests.
 
-**Day 9 — Graph-walk + embedding candidate sources**
-- Implement `GraphWalkCandidateSource` using a recursive CTE (2-hop, 3-hop neighbors) over `connections`.
-- Implement `EmbeddingRetrievalCandidateSource` using the Day 5 cosine ANN repository.
-- Test both against deterministic graph/vector fixtures, including eligibility filtering.
+**Day 9 — Graph-walk + embedding candidate sources ✅**
+- Implemented `GraphWalkCandidateSource` with a cycle-safe recursive CTE, shortest 2/3-hop distance, shortest-path counts, deterministic ordering, and pre-limit direct-connection exclusion.
+- Implemented `EmbeddingRetrievalCandidateSource` using pgvector cosine distance, similarity scoring, and pre-limit direct-connection exclusion.
+- Added deterministic real-Postgres graph/vector fixtures covering provenance, scoring, limits, absent embeddings/members, and shared eligibility behavior.
 
 **Day 10 — Union + parallel fan-out**
 - Combine all three `CandidateSource`s with bounded virtual-thread fan-out in an `L0CandidateGenerator` service.

@@ -7,8 +7,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * ANN (approximate nearest neighbor) queries over member_embeddings using
- * pgvector's {@code <=>} cosine-distance operator
- * operator. Backs {@code EmbeddingRetrievalCandidateSource} (Day 9).
+ * pgvector's {@code <=>} cosine-distance operator. Backs
+ * {@code EmbeddingRetrievalCandidateSource} (Day 9).
  *
  * <p>Plain JdbcTemplate rather than a Spring Data {@code @Query}: the
  * self-join form below never has to bring an embedding into application
@@ -16,6 +16,10 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class EmbeddingSearchRepository {
+
+    /** A neighbor plus its pgvector cosine distance (smaller is closer). */
+    public record EmbeddingNeighbor(long memberId, double cosineDistance) {
+    }
 
     private final JdbcTemplate jdbc;
 
@@ -30,14 +34,48 @@ public class EmbeddingSearchRepository {
      * the database.
      */
     public List<Long> findNearestNeighborIds(long memberId, int limit) {
-        return jdbc.queryForList("""
-                SELECT e2.member_id
+        return findNearestNeighbors(memberId, limit).stream()
+                .map(EmbeddingNeighbor::memberId)
+                .toList();
+    }
+
+    /** Nearest neighbors with their cosine distance. */
+    public List<EmbeddingNeighbor> findNearestNeighbors(long memberId, int limit) {
+        return jdbc.query("""
+                SELECT e2.member_id,
+                       e1.embedding <=> e2.embedding AS cosine_distance
                 FROM member_embeddings e1
                 JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
-                ORDER BY e1.embedding <=> e2.embedding
+                ORDER BY cosine_distance
                 LIMIT ?
-                """, Long.class, memberId, limit);
+                """, (rs, rowNum) -> new EmbeddingNeighbor(
+                        rs.getLong("member_id"),
+                        rs.getDouble("cosine_distance")), memberId, limit);
+    }
+
+    /**
+     * Nearest neighbors excluding first-degree connections before applying
+     * the limit, so eligibility filtering cannot under-fill the result page.
+     */
+    public List<EmbeddingNeighbor> findNearestUnconnectedNeighbors(long memberId, int limit) {
+        return jdbc.query("""
+                SELECT e2.member_id,
+                       e1.embedding <=> e2.embedding AS cosine_distance
+                FROM member_embeddings e1
+                JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
+                WHERE e1.member_id = ?
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM connections c
+                        WHERE c.member_id = e1.member_id
+                          AND c.connected_member_id = e2.member_id
+                  )
+                ORDER BY cosine_distance
+                LIMIT ?
+                """, (rs, rowNum) -> new EmbeddingNeighbor(
+                        rs.getLong("member_id"),
+                        rs.getDouble("cosine_distance")), memberId, limit);
     }
 
     /**

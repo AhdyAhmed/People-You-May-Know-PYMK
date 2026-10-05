@@ -36,9 +36,10 @@ status differ.
 | Member lookup, connection creation, Problem Details, OpenAPI, smoke status | Implemented through Day 6 |
 | Foundation audit and documented data-model/seeding runbook | Implemented on Day 7 |
 | Candidate contract, heuristic source, shared eligibility policy | Implemented on Day 8 |
-| Graph/embedding sources, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Cycle-safe graph-walk and pgvector embedding candidate sources | Implemented on Day 9 |
+| Candidate union, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 8 complete**. Target-only sections below use
+The current checkpoint is **Day 9 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -229,11 +230,11 @@ This mirrors the LinkedIn blog's four stages directly.
 ### Stage L0 — Candidate Generation
 **Goal:** reduce full member pool (v1 scale: up to 1M) down to a few thousand candidates. Optimize for **Recall@k**, not precision.
 
-The `CandidateSource` contract and heuristic implementation are complete as of
-Day 8. Graph and embedding implementations follow on Day 9; Day 10 runs the
-three sources with bounded virtual-thread fan-out and unions them. Sources
-return provenance rather than bare IDs so L1 calibration, debugging, and the
-explanation endpoint can distinguish why a member entered the funnel:
+The `CandidateSource` contract and all three source implementations are
+complete as of Day 9. Day 10 runs them with bounded virtual-thread fan-out and
+unions their results. Sources return provenance rather than bare IDs so L1
+calibration, debugging, and the explanation endpoint can distinguish why a
+member entered the funnel:
 
 ```java
 public record CandidateHit(
@@ -248,8 +249,8 @@ public interface CandidateSource {
 }
 ```
 
-- `GraphWalkCandidateSource` — recursive CTE over `connections` to fetch 2-hop, 3-hop neighbors ("friends of friends").
-- `EmbeddingRetrievalCandidateSource` — pgvector ANN query against `member_embeddings`.
+- `GraphWalkCandidateSource` — **implemented**; a recursive CTE fetches shortest simple 2/3-hop paths, prevents path cycles, counts equally short paths, and prioritizes closer candidates with more paths.
+- `EmbeddingRetrievalCandidateSource` — **implemented**; pgvector cosine retrieval against `member_embeddings`, with cosine similarity as its source-local score.
 - `HeuristicCandidateSource` — **implemented**; exact company/school/geo matches, scored by the fraction of the requester's available profile attributes that match. Results are ordered by match strength and then member ID for deterministic limits.
 
 Every source applies the shared eligibility policy, which excludes the requesting

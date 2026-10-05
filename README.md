@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 8 of 30 complete** — the M1 foundation is complete and M2
-> now has its candidate contract, shared eligibility policy, and first heuristic source.
+> 🚧 **Status: Day 9 of 30 complete** — the M1 foundation is complete and all
+> three M2 candidate sources are implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,10 +29,10 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 8 checkpoint, the
-domain, data generator, embeddings, initial API, and heuristic L0 source are
-implemented. Graph/embedding candidate sources, L1–L2, the orchestrator,
-Redis caching, and re-ranking are scheduled later in the roadmap.
+The diagram is the end-state funnel. At the current Day 9 checkpoint, the
+domain, data generator, embeddings, initial API, and all three L0 sources are
+implemented. Candidate union, L1–L2, the orchestrator, Redis caching, and
+re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -98,7 +98,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, and `pymk-candidate-gen` have real
-content as of Day 8. The remaining implementation modules are intentionally
+content as of Day 9. The remaining implementation modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -177,7 +177,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 8: heuristic candidate source complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 9: all candidate sources complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl -X POST http://localhost:8080/api/v1/connections \
@@ -211,19 +211,26 @@ the pair is already connected. Validation and domain failures use RFC 9457
 `application/problem+json` responses. The live OpenAPI document is available at
 `/v3/api-docs`, with Swagger UI at `/swagger-ui.html`.
 
-## Candidate generation (Day 8)
+## Candidate generation (Days 8–9)
 
 `pymk-candidate-gen` now defines the internal L0 `CandidateSource` contract.
 Each `CandidateHit` includes a candidate ID, stable source type, source-local
 score, and immutable explanation metadata rather than returning a bare ID.
 
-The first implementation, `HeuristicCandidateSource`, retrieves exact
+`HeuristicCandidateSource` retrieves exact
 company, school, and geographic-region matches. It sorts by the number of
 matching available attributes and then member ID, making limits deterministic.
-Its shared eligibility policy removes the requesting member, current
-connections, duplicates, and IDs that no longer exist. This is an internal
-module API; the public PYMK endpoint arrives on Day 11 after the remaining L0
-sources and union are implemented.
+
+`GraphWalkCandidateSource` uses a cycle-safe recursive PostgreSQL CTE to find
+shortest two/three-hop candidates and count equally short paths.
+`EmbeddingRetrievalCandidateSource` uses pgvector cosine distance and exposes
+cosine similarity as its source score. Both database queries remove direct
+connections before applying their limit, preventing under-filled results.
+
+All sources apply the shared eligibility policy, which removes the requesting
+member, current connections, duplicates, and IDs that no longer exist. These
+are internal module APIs; Day 10 adds the bounded parallel union and the public
+PYMK endpoint arrives on Day 11.
 
 ## Tests
 
@@ -281,6 +288,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 8 — Candidate source contract + heuristic retrieval**:
       provenance-preserving `CandidateHit`, deterministic company/school/geo
       retrieval, shared eligibility filtering, and database-backed tests.
+- [x] **Day 9 — Graph-walk + embedding retrieval**: cycle-safe two/three-hop
+      recursive traversal, pgvector cosine retrieval, source scoring, pre-limit
+      connection exclusion, and deterministic integration fixtures.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

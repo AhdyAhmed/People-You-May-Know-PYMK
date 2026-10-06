@@ -37,9 +37,10 @@ status differ.
 | Foundation audit and documented data-model/seeding runbook | Implemented on Day 7 |
 | Candidate contract, heuristic source, shared eligibility policy | Implemented on Day 8 |
 | Cycle-safe graph-walk and pgvector embedding candidate sources | Implemented on Day 9 |
-| Candidate union, orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Bounded parallel L0 union, provenance merge, budgets/global cap | Implemented on Day 10 |
+| Orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 9 complete**. Target-only sections below use
+The current checkpoint is **Day 10 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -230,11 +231,10 @@ This mirrors the LinkedIn blog's four stages directly.
 ### Stage L0 — Candidate Generation
 **Goal:** reduce full member pool (v1 scale: up to 1M) down to a few thousand candidates. Optimize for **Recall@k**, not precision.
 
-The `CandidateSource` contract and all three source implementations are
-complete as of Day 9. Day 10 runs them with bounded virtual-thread fan-out and
-unions their results. Sources return provenance rather than bare IDs so L1
-calibration, debugging, and the explanation endpoint can distinguish why a
-member entered the funnel:
+The `CandidateSource` contract, all three source implementations, and their L0
+union are complete as of Day 10. Sources return provenance rather than bare IDs
+so L1 calibration, debugging, and the explanation endpoint can distinguish why
+a member entered the funnel:
 
 ```java
 public record CandidateHit(
@@ -255,9 +255,13 @@ public interface CandidateSource {
 
 Every source applies the shared eligibility policy, which excludes the requesting
 member, existing first-degree connections, duplicate hits within that source,
-and member IDs that no longer exist. The Day 10 merge de-duplicates across
-sources while retaining every source's provenance, applies per-source budgets,
-and caps the union at roughly 2,000–5,000 candidates.
+and member IDs that no longer exist. `L0CandidateGenerator` runs sources on
+virtual threads behind a configurable concurrency semaphore, enforces source
+budgets even if a source violates its contract, and caps the default union at
+3,000 candidates. It de-duplicates across sources while retaining every source
+hit and orders the union with reciprocal-rank fusion rather than comparing
+uncalibrated source scores. A source failure cancels the remaining fan-out and
+fails the generation request; partial candidate sets are not silently served.
 
 ### Stage L1 — Light Ranker
 **Goal:** narrow a few thousand candidates to a few hundred. Calibrate scores across the heterogeneous L0 sources so they're comparable. Evaluated by **Recall@k** at k≈500.

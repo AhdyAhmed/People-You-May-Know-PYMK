@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 9 complete; Day 10 is next. Target-architecture
+**Current checkpoint:** Day 10 complete; Day 11 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -61,9 +61,10 @@ alone does not mark a day complete when the behavior can be automated.
 - Implemented `EmbeddingRetrievalCandidateSource` using pgvector cosine distance, similarity scoring, and pre-limit direct-connection exclusion.
 - Added deterministic real-Postgres graph/vector fixtures covering provenance, scoring, limits, absent embeddings/members, and shared eligibility behavior.
 
-**Day 10 — Union + parallel fan-out**
-- Combine all three `CandidateSource`s with bounded virtual-thread fan-out in an `L0CandidateGenerator` service.
-- De-duplicate by member ID while preserving source provenance, then enforce per-source budgets and a global cap (e.g. 3,000).
+**Day 10 — Union + parallel fan-out ✅**
+- Added `L0CandidateGenerator` with semaphore-bounded Java 21 virtual-thread fan-out across all registered sources.
+- De-duplicated by member ID while retaining immutable per-source hits, and used reciprocal-rank fusion so incomparable source-local scores are not mixed directly.
+- Added configurable per-source budgets, a 3,000 default global cap, deterministic ordering, strict failure propagation/cancellation, and tests for concurrency, budgets, provenance, caps, validation, and source failures.
 
 **Day 11 — Naive orchestrator + endpoint**
 - `pymk-orchestrator`: wire L0 output directly to the API (no ranking yet, just candidates sorted by mutual-connection count as a placeholder).

@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 9 of 30 complete** — the M1 foundation is complete and all
-> three M2 candidate sources are implemented and tested.
+> 🚧 **Status: Day 10 of 30 complete** — the M1 foundation and the complete
+> parallel L0 candidate-generation pipeline are implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,9 +29,9 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 9 checkpoint, the
-domain, data generator, embeddings, initial API, and all three L0 sources are
-implemented. Candidate union, L1–L2, the orchestrator, Redis caching, and
+The diagram is the end-state funnel. At the current Day 10 checkpoint, the
+domain, data generator, embeddings, initial API, and complete L0 candidate
+pipeline are implemented. L1–L2, the orchestrator, Redis caching, and
 re-ranking are scheduled later in the roadmap.
 
 ```mermaid
@@ -98,7 +98,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, and `pymk-candidate-gen` have real
-content as of Day 9. The remaining implementation modules are intentionally
+content as of Day 10. The remaining implementation modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -177,7 +177,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 9: all candidate sources complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 10: parallel L0 union complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl -X POST http://localhost:8080/api/v1/connections \
@@ -211,7 +211,7 @@ the pair is already connected. Validation and domain failures use RFC 9457
 `application/problem+json` responses. The live OpenAPI document is available at
 `/v3/api-docs`, with Swagger UI at `/swagger-ui.html`.
 
-## Candidate generation (Days 8–9)
+## Candidate generation (Days 8–10)
 
 `pymk-candidate-gen` now defines the internal L0 `CandidateSource` contract.
 Each `CandidateHit` includes a candidate ID, stable source type, source-local
@@ -228,9 +228,27 @@ cosine similarity as its source score. Both database queries remove direct
 connections before applying their limit, preventing under-filled results.
 
 All sources apply the shared eligibility policy, which removes the requesting
-member, current connections, duplicates, and IDs that no longer exist. These
-are internal module APIs; Day 10 adds the bounded parallel union and the public
-PYMK endpoint arrives on Day 11.
+member, current connections, duplicates, and IDs that no longer exist.
+`L0CandidateGenerator` executes them on Java 21 virtual threads with a
+configurable concurrency bound, enforces per-source budgets and a global cap,
+then merges duplicate IDs without losing any source hit. Reciprocal-rank fusion
+provides deterministic union ordering without pretending heterogeneous source
+scores are calibrated. Source failures cancel the remaining work instead of
+silently serving incomplete results. These remain internal module APIs; the
+public PYMK endpoint arrives on Day 11.
+
+Default L0 controls can be overridden with Spring configuration:
+
+```yaml
+pymk:
+  candidate-generation:
+    global-limit: 3000
+    max-concurrency: 3
+    source-limits:
+      HEURISTIC: 1000
+      GRAPH_WALK: 2000
+      EMBEDDING: 1000
+```
 
 ## Tests
 
@@ -291,6 +309,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 9 — Graph-walk + embedding retrieval**: cycle-safe two/three-hop
       recursive traversal, pgvector cosine retrieval, source scoring, pre-limit
       connection exclusion, and deterministic integration fixtures.
+- [x] **Day 10 — Parallel L0 union**: bounded virtual-thread fan-out,
+      configurable source budgets/global cap, provenance-preserving
+      de-duplication, reciprocal-rank fusion, cancellation, and unit tests.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

@@ -25,7 +25,8 @@ class OpenApiDocsTest {
         mvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("PYMK API"))
-                .andExpect(jsonPath("$.paths['/api/v1/members/{id}'].get").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/members/{id}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get").exists());
     }
 
     @Test

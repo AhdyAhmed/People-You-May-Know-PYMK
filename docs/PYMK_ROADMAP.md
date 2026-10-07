@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 10 complete; Day 11 is next. Target-architecture
+**Current checkpoint:** Day 11 complete; Day 12 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -66,9 +66,10 @@ alone does not mark a day complete when the behavior can be automated.
 - De-duplicated by member ID while retaining immutable per-source hits, and used reciprocal-rank fusion so incomparable source-local scores are not mixed directly.
 - Added configurable per-source budgets, a 3,000 default global cap, deterministic ordering, strict failure propagation/cancellation, and tests for concurrency, budgets, provenance, caps, validation, and source failures.
 
-**Day 11 — Naive orchestrator + endpoint**
-- `pymk-orchestrator`: wire L0 output directly to the API (no ranking yet, just candidates sorted by mutual-connection count as a placeholder).
-- Expose `GET /api/v1/pymk/{memberId}`.
+**Day 11 — Naive orchestrator + endpoint ✅**
+- Added `RecommendationOrchestrator`, which enriches the Day 10 L0 union with one bulk mutual-connection query and sorts by mutual count, fusion score, then candidate ID.
+- Exposed `GET /api/v1/pymk/{memberId}?limit=20`, with a default of 20, a server-enforced maximum of 100, explanation reasons, and the established Problem Details contract for invalid, missing-member, and temporarily unavailable paths.
+- Added orchestrator unit tests plus a full MockMvc → L0 → PostgreSQL/pgvector integration fixture covering eligibility, ordering, limits, errors, and OpenAPI discovery.
 
 **Day 12 — Redis caching**
 - Cache L0 output and the final response per member with a TTL and schema/model version in each cache key.

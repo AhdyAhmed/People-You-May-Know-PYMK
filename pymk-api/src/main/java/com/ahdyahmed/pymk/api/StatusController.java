@@ -13,7 +13,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M2 - Day 10: parallel L0 union complete"
+                "milestone", "M2 - Day 11: naive PYMK endpoint complete"
         );
     }
 }

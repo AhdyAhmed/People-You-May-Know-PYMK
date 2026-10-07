@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 10 of 30 complete** — the M1 foundation and the complete
-> parallel L0 candidate-generation pipeline are implemented and tested.
+> 🚧 **Status: Day 11 of 30 complete** — the M1 foundation and the first
+> end-to-end PYMK recommendation endpoint are implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,9 +29,9 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 10 checkpoint, the
+The diagram is the end-state funnel. At the current Day 11 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
-pipeline are implemented. L1–L2, the orchestrator, Redis caching, and
+pipeline plus the naive orchestrator are implemented. L1–L2, Redis caching, and
 re-ranking are scheduled later in the roadmap.
 
 ```mermaid
@@ -97,8 +97,8 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, `pymk-datagen`, and `pymk-candidate-gen` have real
-content as of Day 10. The remaining implementation modules are intentionally
+`pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`, and
+`pymk-orchestrator` have real content as of Day 11. The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -177,9 +177,10 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 10: parallel L0 union complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 11: naive PYMK endpoint complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
+curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
 curl -X POST http://localhost:8080/api/v1/connections \
   -H 'Content-Type: application/json' \
   -d '{"memberId": 42, "connectedMemberId": 981}'   # Day 6, Part 2
@@ -234,8 +235,7 @@ configurable concurrency bound, enforces per-source budgets and a global cap,
 then merges duplicate IDs without losing any source hit. Reciprocal-rank fusion
 provides deterministic union ordering without pretending heterogeneous source
 scores are calibrated. Source failures cancel the remaining work instead of
-silently serving incomplete results. These remain internal module APIs; the
-public PYMK endpoint arrives on Day 11.
+silently serving incomplete results.
 
 Default L0 controls can be overridden with Spring configuration:
 
@@ -249,6 +249,32 @@ pymk:
       GRAPH_WALK: 2000
       EMBEDDING: 1000
 ```
+
+## Recommendation endpoint (Day 11)
+
+`GET /api/v1/pymk/{memberId}?limit=20` serves the complete L0 pipeline through
+`pymk-orchestrator`. The limit defaults to 20 and must be between 1 and 100.
+The Day 11 baseline fetches mutual-connection counts for the whole candidate
+set in one database query, then orders by mutual count, reciprocal-rank fusion,
+and candidate ID. Until L1 arrives, `score` is the mutual-connection count.
+
+```json
+{
+  "memberId": 42,
+  "recommendations": [
+    {
+      "candidateId": 981,
+      "score": 12.0,
+      "mutualConnectionCount": 12,
+      "reasons": ["12 mutual connections", "Same company: Acme Corp"]
+    }
+  ]
+}
+```
+
+Self, existing connections, missing members, and duplicate candidates remain
+excluded. Unknown requesters return `404`, invalid IDs or limits return `400`,
+and a candidate-source failure returns retryable `503` rather than partial data.
 
 ## Tests
 
@@ -312,6 +338,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 10 — Parallel L0 union**: bounded virtual-thread fan-out,
       configurable source budgets/global cap, provenance-preserving
       de-duplication, reciprocal-rank fusion, cancellation, and unit tests.
+- [x] **Day 11 — Naive orchestrator + endpoint**: bulk mutual-connection
+      enrichment, deterministic baseline ranking, bounded public results,
+      explanation reasons, OpenAPI documentation, and end-to-end tests.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

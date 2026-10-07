@@ -1,5 +1,6 @@
 package com.ahdyahmed.pymk.api.error;
 
+import com.ahdyahmed.pymk.orchestrator.RecommendationGenerationException;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -57,6 +58,15 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                 "The request conflicted with a concurrent change; retrying is safe.");
         problem.setTitle("Conflict");
         problem.setType(URI.create(ERROR_TYPE_BASE + "conflict"));
+        return problem;
+    }
+
+    @ExceptionHandler(RecommendationGenerationException.class)
+    ProblemDetail handleRecommendationGeneration(RecommendationGenerationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Recommendations are temporarily unavailable; retrying is safe.");
+        problem.setTitle("Recommendation service unavailable");
+        problem.setType(URI.create(ERROR_TYPE_BASE + "recommendations-unavailable"));
         return problem;
     }
 

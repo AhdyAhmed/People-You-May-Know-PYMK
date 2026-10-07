@@ -1,6 +1,7 @@
 package com.ahdyahmed.pymk.domain.repository;
 
 import com.ahdyahmed.pymk.domain.entity.Connection;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -37,4 +38,29 @@ public interface ConnectionRepository extends JpaRepository<Connection, Long> {
               AND b.member_id = :otherId
             """)
     long countMutualConnections(@Param("memberId") Long memberId, @Param("otherId") Long otherId);
+
+    /**
+     * Fetches the mutual-connection signal for a whole candidate set in one
+     * query. Candidates with no mutual connections are intentionally absent
+     * from the result and are treated as zero by the caller.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT b.member_id AS candidateId,
+                   COUNT(*) AS mutualConnectionCount
+            FROM connections a
+            JOIN connections b
+              ON a.connected_member_id = b.connected_member_id
+            WHERE a.member_id = :memberId
+              AND b.member_id IN (:candidateIds)
+            GROUP BY b.member_id
+            """)
+    List<MutualConnectionCount> countMutualConnectionsForCandidates(
+            @Param("memberId") Long memberId,
+            @Param("candidateIds") Collection<Long> candidateIds);
+
+    interface MutualConnectionCount {
+        Long getCandidateId();
+
+        long getMutualConnectionCount();
+    }
 }

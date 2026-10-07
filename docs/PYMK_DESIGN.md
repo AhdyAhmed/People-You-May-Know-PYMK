@@ -38,9 +38,10 @@ status differ.
 | Candidate contract, heuristic source, shared eligibility policy | Implemented on Day 8 |
 | Cycle-safe graph-walk and pgvector embedding candidate sources | Implemented on Day 9 |
 | Bounded parallel L0 union, provenance merge, budgets/global cap | Implemented on Day 10 |
-| Orchestrator, caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Naive mutual-connection orchestrator and public PYMK endpoint | Implemented on Day 11 |
+| Caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 10 complete**. Target-only sections below use
+The current checkpoint is **Day 11 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -263,6 +264,17 @@ hit and orders the union with reciprocal-rank fusion rather than comparing
 uncalibrated source scores. A source failure cancels the remaining fan-out and
 fails the generation request; partial candidate sets are not silently served.
 
+### Day 11 baseline orchestration
+
+`RecommendationOrchestrator` is the first end-to-end serving implementation.
+It checks that the requester exists, generates the complete L0 union, fetches
+mutual-connection counts for all candidates in one query, and orders by mutual
+count descending. Day 10's fusion score and candidate ID provide deterministic
+tie-breakers. The public limit defaults to 20 and is capped at 100. Candidate
+source failures become retryable `503` Problem Details instead of an empty or
+partially generated list. This mutual-count value is the temporary public
+`score`; L1 replaces it with a calibrated score later in the roadmap.
+
 ### Stage L1 — Light Ranker
 **Goal:** narrow a few thousand candidates to a few hundred. Calibrate scores across the heterogeneous L0 sources so they're comparable. Evaluated by **Recall@k** at k≈500.
 
@@ -362,7 +374,8 @@ API conventions:
   "recommendations": [
     {
       "candidateId": 981,
-      "score": 0.87,
+      "score": 12.0,
+      "mutualConnectionCount": 12,
       "reasons": ["12 mutual connections", "Same company: Acme Corp"]
     }
   ]
@@ -399,7 +412,7 @@ A/B test or production CTR lift.
 ## 11. Suggested Build Order (Milestones)
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
-2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API.
+2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API. **Complete through Day 11; caching follows on Day 12.**
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.

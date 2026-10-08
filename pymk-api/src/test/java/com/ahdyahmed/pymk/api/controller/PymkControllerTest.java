@@ -1,6 +1,7 @@
 package com.ahdyahmed.pymk.api.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -10,18 +11,22 @@ import com.ahdyahmed.pymk.domain.entity.Member;
 import com.ahdyahmed.pymk.domain.repository.ConnectionRepository;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
+import com.ahdyahmed.pymk.orchestrator.RecommendationCache;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Full Day 11 request path against the migrated pgvector/Postgres database. */
+/** Full Days 11–12 request path against PostgreSQL/pgvector and Redis. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
@@ -38,9 +43,20 @@ class PymkControllerTest {
     @Autowired MemberRepository members;
     @Autowired ConnectionRepository connections;
     @Autowired ConnectionService connectionService;
+    @Autowired RecommendationCache cache;
+    @Autowired StringRedisTemplate redis;
+
+    @BeforeEach
+    void clearCache() {
+        redis.execute((RedisCallback<Void>) connection -> {
+            connection.serverCommands().flushDb();
+            return null;
+        });
+    }
 
     @AfterEach
     void cleanCommittedFixture() {
+        clearCache();
         connections.deleteAll();
         members.deleteAll();
     }
@@ -62,6 +78,12 @@ class PymkControllerTest {
                 .andExpect(jsonPath("$.recommendations[1].mutualConnectionCount").value(1))
                 .andExpect(jsonPath("$.recommendations[2].candidateId").value(PROFILE_MATCH))
                 .andExpect(jsonPath("$.recommendations[2].mutualConnectionCount").value(0));
+
+        // Reuses the cached top-100 result and slices it for a different limit.
+        mvc.perform(get("/api/v1/pymk/{memberId}", MEMBER).queryParam("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recommendations.length()").value(1))
+                .andExpect(jsonPath("$.recommendations[0].candidateId").value(TWO_MUTUALS));
     }
 
     @Test
@@ -87,6 +109,29 @@ class PymkControllerTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.title").value("Member not found"))
                 .andExpect(jsonPath("$.memberId").value(999999999));
+    }
+
+    @Test
+    void connectionCreationInvalidatesAffectedCachesAfterCommit() throws Exception {
+        seedGraph();
+        mvc.perform(get("/api/v1/pymk/{memberId}", MEMBER).queryParam("limit", "10"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/pymk/{memberId}", FRIEND_ONE).queryParam("limit", "10"))
+                .andExpect(status().isOk());
+        org.assertj.core.api.Assertions.assertThat(cache.getResult(MEMBER)).isPresent();
+        org.assertj.core.api.Assertions.assertThat(cache.getResult(FRIEND_ONE)).isPresent();
+
+        mvc.perform(post("/api/v1/connections")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"memberId\":810001,\"connectedMemberId\":810005}"))
+                .andExpect(status().isCreated());
+
+        org.assertj.core.api.Assertions.assertThat(cache.getResult(MEMBER)).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(cache.getCandidates(MEMBER)).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(cache.getResult(FRIEND_ONE)).isEmpty();
+        mvc.perform(get("/api/v1/pymk/{memberId}", MEMBER).queryParam("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recommendations[?(@.candidateId == 810005)]").isEmpty());
     }
 
     private void seedGraph() {

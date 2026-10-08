@@ -19,17 +19,22 @@ import org.springframework.stereotype.Service;
 @Service
 public class RecommendationOrchestrator {
 
+    public static final int MAX_RESULTS = 100;
+
     private final L0CandidateGenerator candidateGenerator;
     private final MemberRepository members;
     private final ConnectionRepository connections;
+    private final RecommendationCache cache;
 
     public RecommendationOrchestrator(
             L0CandidateGenerator candidateGenerator,
             MemberRepository members,
-            ConnectionRepository connections) {
+            ConnectionRepository connections,
+            RecommendationCache cache) {
         this.candidateGenerator = candidateGenerator;
         this.members = members;
         this.connections = connections;
+        this.cache = cache;
     }
 
     /**
@@ -40,23 +45,36 @@ public class RecommendationOrchestrator {
         if (memberId <= 0) {
             throw new IllegalArgumentException("memberId must be positive");
         }
-        if (limit <= 0) {
-            throw new IllegalArgumentException("limit must be positive");
+        if (limit <= 0 || limit > MAX_RESULTS) {
+            throw new IllegalArgumentException("limit must be between 1 and " + MAX_RESULTS);
         }
         if (!members.existsById(memberId)) {
             return Optional.empty();
         }
 
+        Optional<RecommendationResult> cachedResult = cache.getResult(memberId);
+        if (cachedResult.isPresent()) {
+            return Optional.of(limit(cachedResult.orElseThrow(), limit));
+        }
+
         final List<MergedCandidate> candidates;
-        try {
-            candidates = candidateGenerator.generate(memberId);
-        } catch (CandidateGenerationException ex) {
-            throw new RecommendationGenerationException(
-                    "Unable to generate complete recommendations for member " + memberId, ex);
+        Optional<List<MergedCandidate>> cachedCandidates = cache.getCandidates(memberId);
+        if (cachedCandidates.isPresent()) {
+            candidates = cachedCandidates.orElseThrow();
+        } else {
+            try {
+                candidates = candidateGenerator.generate(memberId);
+                cache.putCandidates(memberId, candidates);
+            } catch (CandidateGenerationException ex) {
+                throw new RecommendationGenerationException(
+                        "Unable to generate complete recommendations for member " + memberId, ex);
+            }
         }
 
         if (candidates.isEmpty()) {
-            return Optional.of(new RecommendationResult(memberId, List.of()));
+            RecommendationResult empty = new RecommendationResult(memberId, List.of());
+            cache.putResult(memberId, empty);
+            return Optional.of(empty);
         }
 
         List<Long> candidateIds = candidates.stream().map(MergedCandidate::candidateId).toList();
@@ -74,11 +92,21 @@ public class RecommendationOrchestrator {
                         .reversed()
                         .thenComparing(MergedCandidate::fusionScore, Comparator.reverseOrder())
                         .thenComparingLong(MergedCandidate::candidateId))
-                .limit(limit)
+                .limit(MAX_RESULTS)
                 .map(candidate -> toRecommendation(
                         candidate, mutualCounts.getOrDefault(candidate.candidateId(), 0L)))
                 .toList();
-        return Optional.of(new RecommendationResult(memberId, recommendations));
+        RecommendationResult fullResult = new RecommendationResult(memberId, recommendations);
+        cache.putResult(memberId, fullResult);
+        return Optional.of(limit(fullResult, limit));
+    }
+
+    private static RecommendationResult limit(RecommendationResult result, int limit) {
+        if (result.recommendations().size() <= limit) {
+            return result;
+        }
+        return new RecommendationResult(
+                result.memberId(), result.recommendations().subList(0, limit));
     }
 
     private static Recommendation toRecommendation(MergedCandidate candidate, long mutualCount) {

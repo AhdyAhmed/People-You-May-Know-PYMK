@@ -39,9 +39,10 @@ status differ.
 | Cycle-safe graph-walk and pgvector embedding candidate sources | Implemented on Day 9 |
 | Bounded parallel L0 union, provenance merge, budgets/global cap | Implemented on Day 10 |
 | Naive mutual-connection orchestrator and public PYMK endpoint | Implemented on Day 11 |
-| Caching, rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Versioned L0/final Redis caches and graph-mutation invalidation | Implemented on Day 12 |
+| Rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 11 complete**. Target-only sections below use
+The current checkpoint is **Day 12 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -319,19 +320,20 @@ sequenceDiagram
         Orch->>L2: score(42, top500)
         L2-->>Orch: scored 500
         Orch->>RR: blend+diversify(scored)
-        RR-->>Orch: top 20
-        Orch->>Redis: cache top 20 (TTL 6h)
+        RR-->>Orch: top 100
+        Orch->>Redis: cache top 100 (configured TTL)
     end
-    Orch-->>API: top 20
+    Orch-->>API: requested slice (default 20)
     API-->>Client: JSON list
 ```
 
 ### Cache correctness
 
-- L0 and final-result keys include schema/pipeline/model versions so deployments do not serve structurally stale values.
-- TTL limits staleness, but graph mutations also invalidate affected member keys; TTL is not the only consistency mechanism.
-- Cache failures degrade to the underlying pipeline rather than failing recommendation requests.
-- Cached payloads contain stable DTOs, not JPA entities.
+- **Implemented on Day 12:** L0 and final-result keys include schema, pipeline, and model versions so deployments do not serve structurally stale values.
+- L0 defaults to a 30-minute TTL and the final top-100 result to 15 minutes. The API slices that reusable result to the requested 1–100 limit.
+- Successful connection mutations invalidate both layers after commit for both endpoints and their two-hop neighborhoods; this covers requesters whose at-most-three-hop candidate paths can change. TTL remains a consistency backstop.
+- Cache reads, writes, corrupt payloads, and invalidation failures degrade to the underlying pipeline instead of failing recommendation requests.
+- Cached payloads are JSON representations of immutable candidate/recommendation contracts, never JPA entities.
 
 ---
 
@@ -412,7 +414,7 @@ A/B test or production CTR lift.
 ## 11. Suggested Build Order (Milestones)
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
-2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API. **Complete through Day 11; caching follows on Day 12.**
+2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation. **Complete through Day 12.**
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.

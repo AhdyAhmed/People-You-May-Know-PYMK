@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 11 of 30 complete** — the M1 foundation and the first
-> end-to-end PYMK recommendation endpoint are implemented and tested.
+> 🚧 **Status: Day 12 of 30 complete** — the M1 foundation, end-to-end PYMK
+> recommendation endpoint, and Redis cache layers are implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,9 +29,9 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 11 checkpoint, the
+The diagram is the end-state funnel. At the current Day 12 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
-pipeline plus the naive orchestrator are implemented. L1–L2, Redis caching, and
+pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
 
 ```mermaid
@@ -98,7 +98,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`, and
-`pymk-orchestrator` have real content as of Day 11. The remaining modules are intentionally
+`pymk-orchestrator` have real content as of Day 12. The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -177,7 +177,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 11: naive PYMK endpoint complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 12: Redis caching complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -276,14 +276,41 @@ Self, existing connections, missing members, and duplicate candidates remain
 excluded. Unknown requesters return `404`, invalid IDs or limits return `400`,
 and a candidate-source failure returns retryable `503` rather than partial data.
 
+## Redis caching (Day 12)
+
+The orchestrator caches both the full L0 candidate union and the final top-100
+baseline result. A request for any limit from 1 to 100 slices the same final
+entry, avoiding one cache key per limit. Every key contains schema, pipeline,
+and model versions so a deployment can move to a new namespace without reading
+incompatible payloads.
+
+Defaults can be overridden with Spring configuration:
+
+```yaml
+pymk:
+  cache:
+    enabled: true
+    key-prefix: pymk
+    schema-version: v1
+    pipeline-version: l0-rrf-v1
+    model-version: naive-mutual-v1
+    l0-ttl: 30m
+    result-ttl: 15m
+```
+
+After a connection is committed, both cache layers are invalidated for the two
+members and their two-hop neighborhoods. Redis connection, serialization, or
+payload failures fall back to the database-backed pipeline; they do not turn a
+recommendation request into an error.
+
 ## Tests
 
 ```bash
 mvn -B verify
 ```
 
-Repository and integration tests run against a real Postgres (with pgvector)
-started by [Testcontainers](https://testcontainers.com/), so **Docker must be
+Repository and integration tests run against real Postgres/pgvector and Redis
+instances started by [Testcontainers](https://testcontainers.com/), so **Docker must be
 running**, but you do *not* need `docker compose up` for the test suite. Tests
 also run `spring.jpa.hibernate.ddl-auto=validate`, so a mismatch between the
 JPA entities and the Flyway migrations fails the build.
@@ -341,6 +368,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 11 — Naive orchestrator + endpoint**: bulk mutual-connection
       enrichment, deterministic baseline ranking, bounded public results,
       explanation reasons, OpenAPI documentation, and end-to-end tests.
+- [x] **Day 12 — Redis caching**: versioned L0/final keys, configurable TTLs,
+      stable JSON payloads, graceful fallback, post-commit neighborhood
+      invalidation, and real-Redis integration tests.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

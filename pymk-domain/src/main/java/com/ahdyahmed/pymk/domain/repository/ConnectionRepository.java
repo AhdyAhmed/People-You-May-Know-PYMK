@@ -58,6 +58,32 @@ public interface ConnectionRepository extends JpaRepository<Connection, Long> {
             @Param("memberId") Long memberId,
             @Param("candidateIds") Collection<Long> candidateIds);
 
+    /**
+     * Requesters whose at-most-three-hop candidate paths may change when an
+     * edge is added between the two roots: both roots and their two-hop
+     * neighborhoods before the mutation.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT DISTINCT affected.member_id
+            FROM (
+                SELECT :firstMemberId AS member_id
+                UNION ALL
+                SELECT :secondMemberId
+                UNION ALL
+                SELECT c.connected_member_id
+                FROM connections c
+                WHERE c.member_id IN (:firstMemberId, :secondMemberId)
+                UNION ALL
+                SELECT c2.connected_member_id
+                FROM connections c1
+                JOIN connections c2 ON c2.member_id = c1.connected_member_id
+                WHERE c1.member_id IN (:firstMemberId, :secondMemberId)
+            ) affected
+            """)
+    List<Long> findMembersWithinTwoHops(
+            @Param("firstMemberId") Long firstMemberId,
+            @Param("secondMemberId") Long secondMemberId);
+
     interface MutualConnectionCount {
         Long getCandidateId();
 

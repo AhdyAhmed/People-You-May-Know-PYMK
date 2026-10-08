@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 11 complete; Day 12 is next. Target-architecture
+**Current checkpoint:** Day 12 complete; Day 13 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -71,9 +71,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Exposed `GET /api/v1/pymk/{memberId}?limit=20`, with a default of 20, a server-enforced maximum of 100, explanation reasons, and the established Problem Details contract for invalid, missing-member, and temporarily unavailable paths.
 - Added orchestrator unit tests plus a full MockMvc → L0 → PostgreSQL/pgvector integration fixture covering eligibility, ordering, limits, errors, and OpenAPI discovery.
 
-**Day 12 — Redis caching**
-- Cache L0 output and the final response per member with a TTL and schema/model version in each cache key.
-- Invalidate affected members after graph mutations; test hit, miss, expiry, and invalidation paths.
+**Day 12 — Redis caching ✅**
+- Added Redis-backed caches for the full L0 union and the top-100 final result; requested limits are sliced from one reusable per-member result rather than fragmenting keys by limit.
+- Added validated, configurable TTLs and schema/pipeline/model versions in every key, JSON stable-DTO payloads, and cache-error fallback to the underlying pipeline.
+- Connection creation now invalidates both layers after commit for the endpoints and their pre-mutation two-hop neighborhoods, covering requesters whose three-hop paths can change.
+- Added real-Redis Testcontainers coverage for hit/miss, payload round trips, TTL expiry, versioned keys, and post-commit graph invalidation.
 
 **Day 13 — Manual QA pass**
 - Pull a handful of real member IDs from your synthetic set, sanity-check the recommendations "make sense" (e.g. mostly same-company/mutual-friend heavy candidates).

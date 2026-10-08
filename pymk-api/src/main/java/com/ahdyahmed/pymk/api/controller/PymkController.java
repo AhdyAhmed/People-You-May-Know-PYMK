@@ -2,6 +2,7 @@ package com.ahdyahmed.pymk.api.controller;
 
 import com.ahdyahmed.pymk.api.dto.PymkResponse;
 import com.ahdyahmed.pymk.api.service.PymkService;
+import com.ahdyahmed.pymk.orchestrator.RecommendationOrchestrator;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -22,8 +23,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/pymk")
 @Tag(name = "People You May Know", description = "Member connection recommendations")
 public class PymkController {
-
-    private static final int MAX_LIMIT = 100;
 
     private final PymkService pymkService;
 
@@ -48,7 +47,7 @@ public class PymkController {
             @Parameter(description = "Positive member ID", example = "42")
             @Positive @PathVariable long memberId,
             @Parameter(description = "Result count from 1 to 100", example = "20")
-            @Min(1) @Max(MAX_LIMIT)
+            @Min(1) @Max(RecommendationOrchestrator.MAX_RESULTS)
             @RequestParam(defaultValue = "20") int limit) {
         return pymkService.getRecommendations(memberId, limit);
     }

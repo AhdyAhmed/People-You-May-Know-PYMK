@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.ahdyahmed.pymk.candidategen.CandidateGenerationException;
@@ -16,6 +17,7 @@ import com.ahdyahmed.pymk.domain.repository.ConnectionRepository;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +26,7 @@ class RecommendationOrchestratorTest {
     private L0CandidateGenerator generator;
     private MemberRepository members;
     private ConnectionRepository connections;
+    private RecommendationCache cache;
     private RecommendationOrchestrator orchestrator;
 
     @BeforeEach
@@ -31,7 +34,8 @@ class RecommendationOrchestratorTest {
         generator = mock(L0CandidateGenerator.class);
         members = mock(MemberRepository.class);
         connections = mock(ConnectionRepository.class);
-        orchestrator = new RecommendationOrchestrator(generator, members, connections);
+        cache = mock(RecommendationCache.class);
+        orchestrator = new RecommendationOrchestrator(generator, members, connections, cache);
     }
 
     @Test
@@ -62,6 +66,38 @@ class RecommendationOrchestratorTest {
         when(members.existsById(404L)).thenReturn(false);
         assertThat(orchestrator.getRecommendations(404, 20)).isEmpty();
         verify(generator, never()).generate(404L);
+    }
+
+    @Test
+    void finalCacheHitIsSlicedAndBypassesCandidateAndFeatureQueries() {
+        when(members.existsById(42L)).thenReturn(true);
+        RecommendationResult cached = new RecommendationResult(42, List.of(
+                new Recommendation(101, 2, 2, List.of("2 mutual connections")),
+                new Recommendation(102, 1, 1, List.of("1 mutual connection"))));
+        when(cache.getResult(42L)).thenReturn(Optional.of(cached));
+
+        RecommendationResult result = orchestrator.getRecommendations(42, 1).orElseThrow();
+
+        assertThat(result.recommendations()).extracting(Recommendation::candidateId)
+                .containsExactly(101L);
+        verifyNoInteractions(generator, connections);
+    }
+
+    @Test
+    void l0CacheHitBypassesCandidateGenerationAndRebuildsFinalResult() {
+        when(members.existsById(42L)).thenReturn(true);
+        List<MergedCandidate> cachedCandidates = List.of(
+                candidate(101, 0.25, CandidateSourceType.GRAPH_WALK, Map.of()));
+        when(cache.getCandidates(42L)).thenReturn(Optional.of(cachedCandidates));
+        when(connections.countMutualConnectionsForCandidates(42L, List.of(101L)))
+                .thenReturn(List.of(count(101, 2)));
+
+        RecommendationResult result = orchestrator.getRecommendations(42, 20).orElseThrow();
+
+        assertThat(result.recommendations()).extracting(Recommendation::candidateId)
+                .containsExactly(101L);
+        verify(generator, never()).generate(42L);
+        verify(cache).putResult(42L, result);
     }
 
     @Test

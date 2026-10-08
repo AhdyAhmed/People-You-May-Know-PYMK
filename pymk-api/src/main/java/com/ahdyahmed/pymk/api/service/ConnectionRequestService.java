@@ -6,8 +6,10 @@ import com.ahdyahmed.pymk.api.error.InvalidConnectionException;
 import com.ahdyahmed.pymk.api.error.MemberNotFoundException;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
+import com.ahdyahmed.pymk.orchestrator.RecommendationCacheInvalidator;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,11 +24,17 @@ public class ConnectionRequestService {
 
     private final MemberRepository members;
     private final ConnectionService connectionService;
+    private final RecommendationCacheInvalidator cacheInvalidator;
     private final Clock clock;
 
-    public ConnectionRequestService(MemberRepository members, ConnectionService connectionService, Clock clock) {
+    public ConnectionRequestService(
+            MemberRepository members,
+            ConnectionService connectionService,
+            RecommendationCacheInvalidator cacheInvalidator,
+            Clock clock) {
         this.members = members;
         this.connectionService = connectionService;
+        this.cacheInvalidator = cacheInvalidator;
         this.clock = clock;
     }
 
@@ -45,7 +53,11 @@ public class ConnectionRequestService {
             throw new MemberNotFoundException(b);
         }
 
+        Set<Long> affectedMembers = cacheInvalidator.affectedByConnection(a, b);
         boolean created = connectionService.connect(a, b, Instant.now(clock));
+        if (created) {
+            cacheInvalidator.evictAfterCommit(affectedMembers);
+        }
         return new ConnectionResponse(a, b, created);
     }
 }

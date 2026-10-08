@@ -3,6 +3,7 @@
  *
  * <p>Day 11 provides the first serving path: L0 candidates are enriched with
  * mutual-connection counts and deterministically ordered before later ranking
- * stages replace this baseline.</p>
+ * stages replace this baseline. Day 12 adds versioned Redis caches for the L0
+ * union and final result plus post-commit graph-mutation invalidation.</p>
  */
 package com.ahdyahmed.pymk.orchestrator;

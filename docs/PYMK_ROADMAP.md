@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 12 complete; Day 13 is next. Target-architecture
+**Current checkpoint:** Day 13 complete; Day 14 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -77,9 +77,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Connection creation now invalidates both layers after commit for the endpoints and their pre-mutation two-hop neighborhoods, covering requesters whose three-hop paths can change.
 - Added real-Redis Testcontainers coverage for hit/miss, payload round trips, TTL expiry, versioned keys, and post-commit graph invalidation.
 
-**Day 13 — Manual QA pass**
-- Pull a handful of real member IDs from your synthetic set, sanity-check the recommendations "make sense" (e.g. mostly same-company/mutual-friend heavy candidates).
-- Add an automated smoke check for invariants: no self, no existing connections, no duplicates, requested limit respected.
+**Day 13 — Recommendation QA pass ✅**
+- Added a real Postgres/pgvector + Redis end-to-end quality fixture and checked several synthetic requester IDs, including mutual-heavy, shared-profile, direct-connection, and unrelated members.
+- Automated the safety invariants across representative and boundary limits: no self, no existing connections, no duplicates, no missing candidates, and requested limit respected.
+- Verified deterministic cached responses, non-increasing mutual-count ordering, explanation reasons, and a sensible baseline ordering (two mutuals before one mutual before a profile-only match).
+- Added `scripts/day13-recommendation-smoke.ps1` for repeatable spot checks against any locally running seeded application.
 
 **Day 14 — Buffer + README update**
 - Document the "naive v1 pipeline is live" milestone with an example request/response in the README.

@@ -32,7 +32,7 @@ public class PymkController {
 
     @GetMapping("/{memberId}")
     @Operation(summary = "Get people a member may know",
-            description = "Day 11 baseline ordered by mutual connections; later ranking stages will replace the score.")
+            description = "Naive v1 baseline ordered by mutual connections; later ranking stages will replace the score.")
     @ApiResponse(responseCode = "200", description = "Recommendations generated")
     @ApiResponse(responseCode = "400", description = "Member ID or limit is invalid",
             content = @Content(mediaType = "application/problem+json",

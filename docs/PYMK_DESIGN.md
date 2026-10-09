@@ -40,9 +40,10 @@ status differ.
 | Bounded parallel L0 union, provenance merge, budgets/global cap | Implemented on Day 10 |
 | Naive mutual-connection orchestrator and public PYMK endpoint | Implemented on Day 11 |
 | Versioned L0/final Redis caches and graph-mutation invalidation | Implemented on Day 12 |
+| End-to-end recommendation relevance and safety QA | Implemented on Day 13 |
 | Rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 12 complete**. Target-only sections below use
+The current checkpoint is **Day 13 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -369,6 +370,18 @@ API conventions:
 - `POST /connections` mutates the graph only at the current checkpoint. Event ingestion remains a separate future endpoint, avoiding an undocumented synthetic `INVITE_ACCEPTED` event.
 - List endpoints enforce server-side maximum limits even when the client asks for more.
 
+### 8.1 Recommendation quality gate
+
+The Day 13 end-to-end gate exercises the public recommendation endpoint against
+real PostgreSQL/pgvector and Redis containers. Across several synthetic member
+IDs and limits from 1 through 100 it asserts that results never include the
+requester, an existing connection, a duplicate, or a missing member, and never
+exceed the requested limit. It also locks in deterministic cached responses,
+mutual-count ordering, and human-readable reasons. The companion PowerShell
+smoke script applies the response-visible checks to selected IDs in a running
+seeded environment; database-backed automated tests remain the authority for
+the existing-connection invariant.
+
 `GET /api/v1/pymk/{memberId}` response:
 ```json
 {
@@ -414,7 +427,7 @@ A/B test or production CTR lift.
 ## 11. Suggested Build Order (Milestones)
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
-2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation. **Complete through Day 12.**
+2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA. **Complete through Day 13.**
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.

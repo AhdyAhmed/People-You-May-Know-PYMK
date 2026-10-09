@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 12 of 30 complete** — the M1 foundation, end-to-end PYMK
-> recommendation endpoint, and Redis cache layers are implemented and tested.
+> 🚧 **Status: Day 13 of 30 complete** — the M1 foundation, end-to-end PYMK
+> recommendation endpoint, Redis cache layers, and recommendation QA gate are implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 12 checkpoint, the
+The diagram is the end-state funnel. At the current Day 13 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -177,7 +177,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 12: Redis caching complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 13: recommendation QA complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -303,6 +303,25 @@ members and their two-hop neighborhoods. Redis connection, serialization, or
 payload failures fall back to the database-backed pipeline; they do not turn a
 recommendation request into an error.
 
+## Recommendation QA (Day 13)
+
+The automated end-to-end quality gate checks several synthetic requester IDs
+and limits from 1 to 100 against real PostgreSQL/pgvector and Redis containers.
+It rejects self-recommendations, existing connections, duplicates, missing
+members, over-limit responses, unstable cached ordering, and regressions in the
+mutual-heavy baseline or explanation reasons.
+
+For a running application seeded with your own data, inspect several IDs with:
+
+```powershell
+.\scripts\day13-recommendation-smoke.ps1 -MemberId 42,314,2718 -Limit 20
+```
+
+The script fails on response-visible invariant violations and prints candidate
+scores, mutual counts, and reasons for relevance review. Existing-connection
+exclusion is verified by the database-backed automated test because the public
+API intentionally does not expose a member's adjacency list.
+
 ## Tests
 
 ```bash
@@ -371,6 +390,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 12 — Redis caching**: versioned L0/final keys, configurable TTLs,
       stable JSON payloads, graceful fallback, post-commit neighborhood
       invalidation, and real-Redis integration tests.
+- [x] **Day 13 — Recommendation QA**: multi-member end-to-end relevance checks,
+      automated safety invariants across boundary limits, cached determinism,
+      explanation validation, and a reusable live-data smoke script.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

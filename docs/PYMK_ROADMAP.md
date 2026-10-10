@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 13 complete; Day 14 is next. Target-architecture
+**Current checkpoint:** Day 14 complete; Day 15 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -83,8 +83,10 @@ alone does not mark a day complete when the behavior can be automated.
 - Verified deterministic cached responses, non-increasing mutual-count ordering, explanation reasons, and a sensible baseline ordering (two mutuals before one mutual before a profile-only match).
 - Added `scripts/day13-recommendation-smoke.ps1` for repeatable spot checks against any locally running seeded application.
 
-**Day 14 — Buffer + README update**
-- Document the "naive v1 pipeline is live" milestone with an example request/response in the README.
+**Day 14 — Buffer + README update ✅**
+- Declared the M2 "naive v1 pipeline is live" milestone and documented the complete request path from concurrent L0 retrieval through Redis-backed top-100 slicing.
+- Added a runnable request, public response example, stable-contract guidance, and an explicit account of current baseline limitations.
+- Reconciled README, design, roadmap, OpenAPI wording, and the live status endpoint with the Day 14 implementation boundary.
 
 ---
 

@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 13 of 30 complete** — the M1 foundation, end-to-end PYMK
-> recommendation endpoint, Redis cache layers, and recommendation QA gate are implemented and tested.
+> ✅ **Status: Day 14 of 30 complete — naive v1 is live.** The M1 foundation
+> and M2 end-to-end recommendation pipeline are implemented, documented, and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 13 checkpoint, the
+The diagram is the end-state funnel. At the current Day 14 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -60,6 +60,51 @@ flowchart LR
 
 Full architecture, data model, API design, and offline evaluation strategy:
 [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md).
+
+## Naive v1 pipeline is live
+
+The M2 application is runnable end to end. A recommendation request currently:
+
+1. Fans out concurrently to the shared-profile, two/three-hop graph, and
+   pgvector embedding candidate sources.
+2. Removes the requester, existing connections, duplicates, and deleted IDs.
+3. Merges source provenance with reciprocal-rank fusion.
+4. Enriches candidates in one bulk query and ranks by mutual connections,
+   fusion score, then candidate ID.
+5. Caches the full L0 union and reusable top-100 result in Redis, then returns
+   the requested 1–100 slice with human-readable reasons.
+
+After completing the Quickstart below, request three recommendations with:
+
+```bash
+curl --fail --show-error 'http://localhost:8080/api/v1/pymk/42?limit=3'
+```
+
+Example response shape (candidate IDs and signal values depend on the generated
+dataset size, while the schema and ordering contract are stable):
+
+```json
+{
+  "memberId": 42,
+  "recommendations": [
+    {
+      "candidateId": 981,
+      "score": 12.0,
+      "mutualConnectionCount": 12,
+      "reasons": [
+        "12 mutual connections",
+        "Same company: Acme Corp"
+      ]
+    }
+  ]
+}
+```
+
+This is intentionally the **naive baseline**: `score` is currently the mutual
+connection count, and generated embeddings are deterministic placeholder
+vectors. The feature store and learned L1/L2 ranking stages begin in M3/M4.
+Authentication and abuse controls remain out of scope for this local portfolio
+API, so it should not be exposed publicly as-is.
 
 ## Tech stack
 
@@ -98,7 +143,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`, and
-`pymk-orchestrator` have real content as of Day 12. The remaining modules are intentionally
+`pymk-orchestrator` have real content as of Day 14. The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -177,7 +222,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 13: recommendation QA complete"}
+# {"service":"pymk-api","status":"up","milestone":"M2 - Day 14: naive v1 live"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -258,19 +303,7 @@ The Day 11 baseline fetches mutual-connection counts for the whole candidate
 set in one database query, then orders by mutual count, reciprocal-rank fusion,
 and candidate ID. Until L1 arrives, `score` is the mutual-connection count.
 
-```json
-{
-  "memberId": 42,
-  "recommendations": [
-    {
-      "candidateId": 981,
-      "score": 12.0,
-      "mutualConnectionCount": 12,
-      "reasons": ["12 mutual connections", "Same company: Acme Corp"]
-    }
-  ]
-}
-```
+The milestone section above contains the public request and response example.
 
 Self, existing connections, missing members, and duplicate candidates remain
 excluded. Unknown requesters return `404`, invalid IDs or limits return `400`,
@@ -393,6 +426,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 13 — Recommendation QA**: multi-member end-to-end relevance checks,
       automated safety invariants across boundary limits, cached determinism,
       explanation validation, and a reusable live-data smoke script.
+- [x] **Day 14 — M2 release documentation**: declared the naive v1 pipeline
+      live, documented its complete request path, added a runnable request and
+      response example, and stated the current baseline limitations explicitly.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

@@ -1,5 +1,3 @@
-version: "3.9"
-
 # PYMK local dev stack — Day 1 (see PYMK_ROADMAP.md).
 # Usage:
 #   docker compose -f infra/docker-compose.yml up -d

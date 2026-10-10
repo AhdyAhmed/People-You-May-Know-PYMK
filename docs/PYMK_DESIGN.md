@@ -41,9 +41,10 @@ status differ.
 | Naive mutual-connection orchestrator and public PYMK endpoint | Implemented on Day 11 |
 | Versioned L0/final Redis caches and graph-mutation invalidation | Implemented on Day 12 |
 | End-to-end recommendation relevance and safety QA | Implemented on Day 13 |
+| M2 naive-v1 release contract and runnable documentation | Completed on Day 14 |
 | Rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
 
-The current checkpoint is **Day 13 complete**. Target-only sections below use
+The current checkpoint is **Day 14 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -427,7 +428,7 @@ A/B test or production CTR lift.
 ## 11. Suggested Build Order (Milestones)
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
-2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA. **Complete through Day 13.**
+2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
 3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.

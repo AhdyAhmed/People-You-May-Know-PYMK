@@ -1,8 +1,5 @@
 /**
- * Feature computation and read/write API backing the pymk_features table.
- *
- * <p>Deliberately empty on Day 1 - this module exists so the multi-module
- * build wiring, dependency graph, and package layout are correct before any
- * real logic lands (see PYMK_ROADMAP.md, Week 1).</p>
+ * Feature-store entity, directional composite key, and persistence API backing
+ * the {@code pymk_features} table. Feature computation arrives on Day 16.
  */
 package com.ahdyahmed.pymk.featurestore;

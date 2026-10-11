@@ -32,8 +32,11 @@ public class BulkLoader {
     }
 
     public void truncateAll() {
-        log.info("Truncating member_events, connections, member_embeddings, members ...");
-        jdbc.execute("TRUNCATE TABLE member_events, connections, member_embeddings, members RESTART IDENTITY CASCADE");
+        log.info("Truncating pymk_features, member_events, connections, member_embeddings, members ...");
+        jdbc.execute("""
+                TRUNCATE TABLE pymk_features, member_events, connections,
+                    member_embeddings, members RESTART IDENTITY CASCADE
+                """);
     }
 
     public void insertMembers(List<MemberRecord> members) {

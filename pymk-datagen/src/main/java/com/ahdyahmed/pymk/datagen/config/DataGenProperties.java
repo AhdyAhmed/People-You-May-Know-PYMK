@@ -29,7 +29,7 @@ public class DataGenProperties {
     /** Master seed. Same seed + same member count always produces the same dataset. */
     private long seed = 42L;
 
-    /** If true, truncates members/connections/member_events/member_embeddings before loading. */
+    /** If true, truncates generated data and dependent feature rows before loading. */
     private boolean truncateExisting = true;
 
     /** Distinct companies/schools/regions in the fixed pool (see OrganizationPool). */

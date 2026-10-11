@@ -63,7 +63,7 @@ java -jar pymk-datagen/target/pymk-datagen.jar --pymk.datagen.members=20000
 ```
 
 By default the generator **truncates** `members`, `connections`,
-`member_events`, and `member_embeddings` before loading
+`member_events`, `member_embeddings`, and dependent `pymk_features` before loading
 (`pymk.datagen.truncate-existing`, default `true`) — set it to `false` to
 preserve the existing tables. Because generated member IDs start at `1`,
 preserving a non-empty generated dataset will normally cause primary-key
@@ -86,5 +86,5 @@ that's what `MemberEmbeddingAnnQueryTest` (`pymk-domain`) is for.
 | `pymk.datagen.avg-degree` | `12` | Target average node degree (edges/new member ≈ half this) |
 | `pymk.datagen.events-per-member` | `2.0` | Extra implicit/ignored-invite event attempts per member, in addition to accepted-connection lifecycle events |
 | `pymk.datagen.seed` | `42` | Master random seed (reproducible runs) |
-| `pymk.datagen.truncate-existing` | `true` | Wipe members, connections, events, and embeddings before loading |
+| `pymk.datagen.truncate-existing` | `true` | Wipe members, connections, events, embeddings, and pair features before loading |
 | `pymk.datagen.organization-pool-size` | `250` | Distinct companies/schools in the pool (regions use a fifth of this) |

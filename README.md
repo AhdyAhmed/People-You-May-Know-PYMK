@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> ✅ **Status: Day 14 of 30 complete — naive v1 is live.** The M1 foundation
-> and M2 end-to-end recommendation pipeline are implemented, documented, and tested.
+> 🚧 **Status: Day 15 of 30 complete.** The M1 foundation and M2 naive-v1
+> recommendation pipeline are live; M3 feature-store persistence is now implemented and tested.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 14 checkpoint, the
+The diagram is the end-state funnel. At the current Day 15 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -142,8 +142,9 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`, and
-`pymk-orchestrator` have real content as of Day 14. The remaining modules are intentionally
+`pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
+`pymk-orchestrator`, and `pymk-feature-store` have real content as of Day 15.
+The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
 ## Data model & how to seed the DB
@@ -157,6 +158,7 @@ the entity mappings against them instead of creating or changing tables.
 | `connections` | First-degree graph adjacency | One undirected connection is stored as two directed rows; self-edges and duplicate directions are rejected |
 | `member_events` | Timestamped profile, search, and invite activity | Actor and target must exist; generated invite lifecycles are temporally ordered |
 | `member_embeddings` | One 128-dimensional pgvector embedding per member | Uses an HNSW cosine index; current vectors are random normalized placeholders |
+| `pymk_features` | Directional member-candidate feature snapshots | Composite pair key, non-negative counts, bounded cosine similarity, and `feature_as_of <= computed_at` |
 
 `ConnectionService` owns the two-row connection invariant and writes both
 directions in one transaction. Application code should not create a single
@@ -184,11 +186,12 @@ prints row counts, degree percentiles, popular organizations, and event counts
 when it finishes. You can independently inspect the loaded tables with:
 
 ```bash
-docker exec pymk-postgres psql -U pymk -d pymk -c "SELECT 'members' AS table_name, count(*) FROM members UNION ALL SELECT 'connections', count(*) FROM connections UNION ALL SELECT 'member_events', count(*) FROM member_events UNION ALL SELECT 'member_embeddings', count(*) FROM member_embeddings;"
+docker exec pymk-postgres psql -U pymk -d pymk -c "SELECT 'members' AS table_name, count(*) FROM members UNION ALL SELECT 'connections', count(*) FROM connections UNION ALL SELECT 'member_events', count(*) FROM member_events UNION ALL SELECT 'member_embeddings', count(*) FROM member_embeddings UNION ALL SELECT 'pymk_features', count(*) FROM pymk_features;"
 ```
 
-> **Reset behavior:** seeding truncates all four generated-data tables by
-> default. This is controlled by `--pymk.datagen.truncate-existing=false`, but
+> **Reset behavior:** seeding truncates the generated-data tables and any
+> dependent `pymk_features` rows by default. This is controlled by
+> `--pymk.datagen.truncate-existing=false`, but
 > disabling truncation is not an append mode: generated IDs restart at `1` and
 > will conflict with an existing generated dataset. PostgreSQL data persists in
 > the `pymk_postgres_data` Docker volume; `docker compose -f
@@ -222,7 +225,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M2 - Day 14: naive v1 live"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 15: feature-store persistence complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -429,6 +432,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 14 — M2 release documentation**: declared the naive v1 pipeline
       live, documented its complete request path, added a runnable request and
       response example, and stated the current baseline limitations explicitly.
+- [x] **Day 15 — Feature-store schema + composite key**: Flyway V3,
+      directional `PairId`, `PymkPairFeature`, Spring Data persistence,
+      leakage-safe `featureAsOf` plus audit `computedAt`, database constraints,
+      reset-path compatibility, and real-PostgreSQL integration tests.
 - [ ] ... see the roadmap for the full 30-day plan through M8.
 
 ## License

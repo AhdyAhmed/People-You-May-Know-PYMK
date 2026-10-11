@@ -42,9 +42,10 @@ status differ.
 | Versioned L0/final Redis caches and graph-mutation invalidation | Implemented on Day 12 |
 | End-to-end recommendation relevance and safety QA | Implemented on Day 13 |
 | M2 naive-v1 release contract and runnable documentation | Completed on Day 14 |
-| Rankers, re-ranker, batch jobs | Planned; modules are intentionally skeletal |
+| Directional pair-feature schema, entity, repository, and snapshot contract | Implemented on Day 15 |
+| Feature computation, rankers, re-ranker, batch jobs | Planned for Days 16+ |
 
-The current checkpoint is **Day 14 complete**. Target-only sections below use
+The current checkpoint is **Day 15 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -209,6 +210,7 @@ public class PymkPairFeature {
     private boolean sameGeo;
     private double embeddingCosineSim;
     private int profileViewCountLast30d;
+    private Instant featureAsOf; // latest source data included; leakage boundary
     private Instant computedAt;
 }
 ```
@@ -225,6 +227,8 @@ public class PymkPairFeature {
 - API connection creation is idempotent: new edges return `201`, complete existing edges return `200`, and a unique-constraint race returns retryable `409`.
 - Synthetic connections and events never predate either involved member and never occur after the generator's reference time.
 - Embedding retrieval uses cosine distance (`<=>`) with the matching `vector_cosine_ops` HNSW index. `<->` is Euclidean distance and is not interchangeable at the query/index level.
+- `pymk_features` keys are directional because member-to-candidate activity can differ from candidate-to-member activity. Both IDs must exist and differ.
+- `feature_as_of` is the latest source-data time included in a row; `computed_at` is when it was materialized. The database enforces `feature_as_of <= computed_at` so feature snapshots cannot claim future knowledge.
 
 ---
 
@@ -429,7 +433,7 @@ A/B test or production CTR lift.
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: batch feature computation, logistic regression light ranker.
+3. **M3 — Feature store + L1**: directional feature-store persistence is complete through Day 15; feature computation, batch materialization, model training, and light-ranker serving follow.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Batch jobs + scheduling**: Spring Batch jobs for nightly refresh.

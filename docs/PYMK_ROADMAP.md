@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 14 complete; Day 15 is next. Target-architecture
+**Current checkpoint:** Day 15 complete; Day 16 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -92,8 +92,11 @@ alone does not mark a day complete when the behavior can be automated.
 
 ## Week 3 — Feature Store & Light Ranker (M3)
 
-**Day 15 — `pymk_features` table + `PairId`**
-- Add the `PymkPairFeature` entity, composite key, migration, and feature-as-of timestamp.
+**Day 15 — `pymk_features` table + `PairId` ✅**
+- Added the directional, serializable `PairId` composite key, `PymkPairFeature` entity, and Spring Data repository in the previously skeletal feature-store module.
+- Added Flyway V3 with member foreign keys, a composite primary key, self-pair/count/cosine/time constraints, and indexes for member, candidate, and stale-snapshot access paths.
+- Preserved both `featureAsOf` (the leakage boundary) and `computedAt` (materialization audit time), with Java and database enforcement that the snapshot cannot be later than computation.
+- Added real-PostgreSQL migration/mapping/repository tests and kept the synthetic-data reset path compatible with dependent feature rows.
 
 **Day 16 — Feature computation logic**
 - Write the feature calculation functions: mutual connection count, same-company/school/geo flags, profile-view counts.

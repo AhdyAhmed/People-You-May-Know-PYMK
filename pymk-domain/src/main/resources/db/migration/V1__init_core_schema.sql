@@ -1,7 +1,7 @@
 -- V1: core domain schema (Day 2, PYMK_ROADMAP.md Week 1).
 -- Covers: members, connections, member_events.
 -- member_embeddings (pgvector) lands in V2 on Day 5.
--- pymk_features (feature store) lands later, Week 3 Day 15.
+-- pymk_features (feature store) is added by V3, Week 3 Day 15.
 
 -- ============================================================
 -- members

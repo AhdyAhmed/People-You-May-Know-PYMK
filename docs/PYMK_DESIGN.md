@@ -9,6 +9,7 @@ A portfolio-scale reimplementation of LinkedIn-style "People You May Know" recom
 **Functional goals**
 - Given a member, recommend a ranked list of other members they are likely to connect with.
 - Support explicit signals (mutual connections, shared company/school, location) and implicit signals (profile views, search appearances).
+- Capture member activity through a durable Kafka event backbone so fresh behavioral signals can update feature projections without coupling request handling to downstream consumers.
 - Provide an exposure-diversity pass so results are not dominated by a single cluster (e.g. all coworkers), while avoiding unsupported claims of protected-attribute fairness.
 - Serve recommendations with low latency (<150ms p99 target for demo scale).
 
@@ -19,7 +20,6 @@ A portfolio-scale reimplementation of LinkedIn-style "People You May Know" recom
 
 **Out of scope (documented, not built)**
 - True graph-database-scale traversal (v1 uses a graph adjacency table in Postgres; Neo4j or adjacency shards are upgrade paths, not current modules).
-- Real-time streaming infrastructure (Kafka may be added later, but is not part of v1 or the current repository).
 - Authentication, authorization, and abuse controls. The portfolio API is local/demo infrastructure and must not be exposed publicly without them.
 
 ### 1.1 Document status and implementation boundary
@@ -43,9 +43,11 @@ status differ.
 | End-to-end recommendation relevance and safety QA | Implemented on Day 13 |
 | M2 naive-v1 release contract and runnable documentation | Completed on Day 14 |
 | Directional pair-feature schema, entity, repository, and snapshot contract | Implemented on Day 15 |
-| Feature computation, rankers, re-ranker, batch jobs | Planned for Days 16+ |
+| Snapshot-safe pair-feature computation | Implemented on Day 16 |
+| Feature batch materialization, rankers, and re-ranker | Planned for Days 17+ |
+| Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 15 complete**. Target-only sections below use
+The current checkpoint is **Day 16 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -59,8 +61,10 @@ flowchart LR
     end
 
     UI -->|"GET /api/v1/pymk/42"| GW["API Gateway / pymk-api"]
+    UI -->|"POST /api/v1/events"| GW
 
     GW --> ORCH[Recommendation Orchestrator]
+    GW -->|"event + outbox in one transaction"| DB
 
     subgraph Offline["Offline / Batch (Spring Batch + scheduled jobs)"]
         ETL[Feature ETL Jobs]
@@ -75,6 +79,14 @@ flowchart LR
         RR["Re-Ranker: Exposure Diversity"]
     end
 
+    subgraph Streaming["Event Streaming (planned M6)"]
+        RELAY[Transactional Outbox Relay]
+        KAFKA[[Apache Kafka]]
+        PROJ[Idempotent Feature Projection Consumer]
+        INVALIDATE[Cache Invalidation Consumer]
+        DLT[Dead-Letter Topics]
+    end
+
     ORCH --> L0 --> L1 --> L2 --> RR --> ORCH
     ORCH --> CACHE[(Redis Cache)]
     L0 --> GRAPHDB[(Graph Adjacency Store)]
@@ -87,13 +99,17 @@ flowchart LR
     TRAIN --> MODELSTORE
     GRAPH --> GRAPHDB
     ORCH --> DB
+    DB --> RELAY --> KAFKA
+    KAFKA --> PROJ --> FEATSTORE
+    KAFKA --> INVALIDATE --> CACHE
+    KAFKA -->|"retry exhausted"| DLT
 ```
 
 Each ranking stage will be implemented behind a well-defined Java interface and
 run in-process for v1. A later service extraction can replace an implementation
 with REST/gRPC without changing the orchestrator's domain contract. Module
-boundaries are architectural seams, not a requirement to deploy eleven
-microservices.
+boundaries are architectural seams, not a requirement to deploy every module as
+a separate microservice.
 
 ---
 
@@ -105,7 +121,7 @@ microservices.
 | Persistence | Spring Data JPA + PostgreSQL | Core member/connection/event data |
 | Caching | Spring Data Redis | Cache L0 candidate sets and final PYMK lists (TTL) |
 | Batch / ETL | Spring Batch | Nightly feature computation, model refresh jobs |
-| Async / messaging (optional) | Spring Kafka | Event capture (profile views, invites) for feature freshness |
+| Async / messaging (planned M6) | Apache Kafka + Spring Kafka | Durable member/connection events, streaming feature projections, and cache invalidation |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
 | Vector similarity | pgvector extension on Postgres | Embedding-based retrieval (EBR) candidate source |
 | ML training | Python (scikit-learn/XGBoost) exported to **ONNX** or **PMML**, served from Java via ONNX Runtime / JPMML-Evaluator | Keeps training in the best ecosystem for it, keeps serving in Java |
@@ -132,6 +148,7 @@ pymk/
 ├── pymk-orchestrator/       # wires stages together, exposes internal service API
 ├── pymk-api/                # public REST controllers, request/response DTOs
 ├── pymk-batch/               # Spring Batch jobs: ETL, model refresh, graph index build
+├── pymk-event-stream/        # Kafka contracts, outbox relay, consumers, retries, and projections (planned M6)
 ├── pymk-datagen/             # one-off synthetic dataset generator for local development
 ├── pymk-ml-training/         # Python project (offline), exports model artifacts
 ├── infra/                    # docker-compose.yml, k8s manifests, init SQL
@@ -145,8 +162,8 @@ pymk/
 
 ### 5.1 Implemented and planned entities
 
-`Member`, `Connection`, `MemberEvent`, and `MemberEmbedding` are implemented.
-`PymkPairFeature` is the planned Week 3 feature-store entity.
+`Member`, `Connection`, `MemberEvent`, `MemberEmbedding`, and
+`PymkPairFeature` are implemented.
 
 ```java
 @Entity
@@ -229,6 +246,9 @@ public class PymkPairFeature {
 - Embedding retrieval uses cosine distance (`<=>`) with the matching `vector_cosine_ops` HNSW index. `<->` is Euclidean distance and is not interchangeable at the query/index level.
 - `pymk_features` keys are directional because member-to-candidate activity can differ from candidate-to-member activity. Both IDs must exist and differ.
 - `feature_as_of` is the latest source-data time included in a row; `computed_at` is when it was materialized. The database enforces `feature_as_of <= computed_at` so feature snapshots cannot claim future knowledge.
+- Day 16 feature computation counts mutual edges only when both directed edges existed by `feature_as_of`, and counts requester-to-candidate profile views in `(feature_as_of - 30 days, feature_as_of]`. Reverse views, the exclusive lower boundary, and later events are excluded.
+- Embeddings are used only when both `updated_at` values are no later than the snapshot; otherwise cosine similarity is the neutral value `0`. Zero vectors also map to `0`, while malformed/non-finite vectors fail fast.
+- Company, school, and geo flags require the same nonblank canonical value. The current synthetic model treats these member attributes as stable; historical profile-version storage is required before mutable production profiles can be backfilled without leakage.
 
 ---
 
@@ -353,6 +373,50 @@ sequenceDiagram
 | `ModelSyncJob` | on model release | Pull latest ONNX/PMML model artifact from the model registry (could just be a versioned S3/local path for a portfolio project) into `pymk-heavy-ranker` / `pymk-light-ranker` |
 | `OfflineEvalJob` | weekly | Compute Recall@k / AUC / Precision@k against a held-out labeled set, log to a metrics table for a "model quality over time" dashboard |
 
+### 7.1 Kafka event pipeline (planned M6)
+
+Kafka complements the offline jobs; it does not replace PostgreSQL or the
+nightly, reproducible feature snapshot. PostgreSQL remains the source of truth,
+while Kafka distributes committed changes to independently scalable consumers.
+
+`POST /api/v1/events` will validate an event and atomically insert both the
+canonical `member_events` row and an outbox row in PostgreSQL. A relay publishes
+the outbox record to Kafka and marks it published only after broker
+acknowledgement. This avoids the failure window created by writing to the
+database and Kafka separately. The endpoint returns `202 Accepted` after the
+database transaction commits; downstream projections are eventually
+consistent.
+
+Initial topics and ownership:
+
+| Topic | Key | Producers | Consumers |
+|---|---|---|---|
+| `pymk.member-events.v1` | subject member ID | Outbox relay | Pair-feature projection, analytics |
+| `pymk.connection-events.v1` | canonical connection-pair key | Outbox relay | Graph projection, cache invalidation |
+| `pymk.member-events.dlt.v1` | original record key | Retry recoverer | Operations/replay tooling |
+| `pymk.connection-events.dlt.v1` | original record key | Retry recoverer | Operations/replay tooling |
+
+The versioned JSON event envelope contains `eventId`, `schemaVersion`,
+`eventType`, `occurredAt`, `ingestedAt`, `subjectMemberId`, optional
+`targetMemberId`, `correlationId`, and a type-specific payload. JSON Schema is
+kept with the producer and compatibility-tested in the reactor; incompatible
+changes require a new topic version.
+
+Delivery is deliberately **at least once**. Consumers commit Kafka offsets only
+after their database transaction succeeds and use `eventId` as an idempotency
+key. Processing uses bounded retries with exponential backoff; exhausted records
+go to the matching dead-letter topic with the original metadata and failure
+reason. Partition keys preserve ordering for one subject, but no global event
+ordering is assumed. Consumers reject stale events when applying a projection
+whose recorded event time is newer.
+
+Streaming projections maintain recent counters such as profile views and issue
+targeted cache invalidations. Nightly `FeatureComputationJob` output remains the
+repair/reconciliation path, so replaying a topic or recovering from consumer
+downtime cannot permanently drift the feature store. Metrics cover outbox lag,
+consumer lag, publish/consume rates, retries, dead-letter counts, processing
+latency, and projection freshness.
+
 ---
 
 ## 8. API Design
@@ -364,7 +428,7 @@ GET  /api/v1/members/{id}                                # implemented
 POST /api/v1/connections                                 # implemented graph mutation
 GET  /api/v1/pymk/{memberId}?limit=20
 GET  /api/v1/pymk/{memberId}/explain/{candidateId}   # returns feature breakdown, for demo/debugging
-POST /api/v1/events                                   # record invite_sent/accepted/ignored, profile_view
+POST /api/v1/events                                   # planned M6: durably accept an event and return 202
 ```
 
 API conventions:
@@ -372,7 +436,7 @@ API conventions:
 - IDs and limits must be positive; malformed or semantically invalid input returns `400`.
 - Missing members return `404`; concurrent uniqueness races return `409`.
 - Errors use RFC 9457 `application/problem+json` with a stable type URI and useful extensions.
-- `POST /connections` mutates the graph only at the current checkpoint. Event ingestion remains a separate future endpoint, avoiding an undocumented synthetic `INVITE_ACCEPTED` event.
+- `POST /connections` mutates the graph only at the current checkpoint. Event ingestion remains a separate planned M6 endpoint, avoiding an undocumented synthetic `INVITE_ACCEPTED` event.
 - List endpoints enforce server-side maximum limits even when the client asks for more.
 
 ### 8.1 Recommendation quality gate
@@ -426,6 +490,7 @@ A/B test or production CTR lift.
 - Candidate/result caching in Redis keeps p99 latency low for repeat requests; cold-start requests pay the full pipeline cost once.
 - Each stage is stateless and horizontally scalable if split into its own service — the module boundaries in section 4 are drawn specifically so that split is mechanical, not a redesign.
 - Feature store table can be swapped for a real feature store (Feast) without changing the ranker interfaces.
+- Kafka is not on the synchronous recommendation read path. Broker or consumer downtime can delay freshness but must not make `GET /api/v1/pymk/{memberId}` unavailable; the outbox and nightly reconciliation job provide recovery paths.
 
 ---
 
@@ -433,12 +498,13 @@ A/B test or production CTR lift.
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: directional feature-store persistence is complete through Day 15; feature computation, batch materialization, model training, and light-ranker serving follow.
+3. **M3 — Feature store + L1**: directional persistence and snapshot-safe pair-feature computation are complete through Day 16; batch materialization, model training, and light-ranker serving follow.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
-6. **M6 — Batch jobs + scheduling**: Spring Batch jobs for nightly refresh.
-7. **M7 — Observability + offline eval dashboard**: Micrometer/Grafana, Recall@k tracking over time.
-8. **M8 — Polish for portfolio**: Docker Compose one-command startup, README with architecture diagram, sample requests, and a short write-up of the offline A/B result.
+6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.
+7. **M7 — Batch operations**: scheduling, restartability, idempotency, reconciliation, and remaining production-style batch jobs.
+8. **M8 — Observability + offline eval dashboard**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, and Recall@k tracking over time.
+9. **M9 — Polish for portfolio**: one-command Docker Compose startup including Kafka, architecture/runbook documentation, load-test evidence, sample requests, and a reproducible offline evaluation report.
 
 ---
 

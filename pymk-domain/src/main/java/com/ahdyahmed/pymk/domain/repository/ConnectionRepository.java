@@ -1,6 +1,7 @@
 package com.ahdyahmed.pymk.domain.repository;
 
 import com.ahdyahmed.pymk.domain.entity.Connection;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -38,6 +39,25 @@ public interface ConnectionRepository extends JpaRepository<Connection, Long> {
               AND b.member_id = :otherId
             """)
     long countMutualConnections(@Param("memberId") Long memberId, @Param("otherId") Long otherId);
+
+    /**
+     * Snapshot-safe mutual-connection count for offline feature computation.
+     * Both directed edges to the shared neighbor must exist by the snapshot;
+     * rows created later are deliberately excluded to prevent label leakage.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT COUNT(*)
+            FROM connections a
+            JOIN connections b ON a.connected_member_id = b.connected_member_id
+            WHERE a.member_id = :memberId
+              AND b.member_id = :otherId
+              AND a.connected_at <= :asOf
+              AND b.connected_at <= :asOf
+            """)
+    long countMutualConnectionsAsOf(
+            @Param("memberId") Long memberId,
+            @Param("otherId") Long otherId,
+            @Param("asOf") Instant asOf);
 
     /**
      * Fetches the mutual-connection signal for a whole candidate set in one

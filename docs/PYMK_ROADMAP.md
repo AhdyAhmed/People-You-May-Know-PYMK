@@ -1,10 +1,10 @@
 # PYMK Backend — 30-Day Build Roadmap
 
 Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
-M6–M8 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
+M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 15 complete; Day 16 is next. Target-architecture
+**Current checkpoint:** Day 16 complete; Day 17 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -98,9 +98,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Preserved both `featureAsOf` (the leakage boundary) and `computedAt` (materialization audit time), with Java and database enforcement that the snapshot cannot be later than computation.
 - Added real-PostgreSQL migration/mapping/repository tests and kept the synthetic-data reset path compatible with dependent feature rows.
 
-**Day 16 — Feature computation logic**
-- Write the feature calculation functions: mutual connection count, same-company/school/geo flags, profile-view counts.
-- Unit test each feature calculator independently.
+**Day 16 — Feature computation logic ✅**
+- Added `PairFeatureComputer` to produce the complete directional feature vector without persisting it; the Day 17 batch job will own chunked upserts.
+- Added snapshot-bounded mutual-connection and pair-event queries, an exact nonblank profile-match function, safe cosine similarity, and neutral similarity when either embedding was not available at the snapshot.
+- Defined the profile-view window as `(featureAsOf - 30 days, featureAsOf]` and rejected missing/not-yet-created pair members and snapshots later than computation time.
+- Added pure unit tests plus real-PostgreSQL/pgvector integration coverage for all signals, directionality, time boundaries, future-data exclusion, missing embeddings, and invalid inputs.
 
 **Day 17 — `FeatureComputationJob` (Spring Batch)**
 - First real Spring Batch job: chunk-process active member pairs, compute features strictly as of the configured snapshot time, and write into `pymk_features`.
@@ -159,15 +161,45 @@ alone does not mark a day complete when the behavior can be automated.
 **Day 30 — Bayesian weight tuning (offline)**
 - Small offline script (`scikit-optimize` or similar) that searches blend weights against the held-out logged dataset to maximize a simulated engagement metric; feed the tuned weights back into `pymk-reranker` config.
 
-### Post-Day-30 extensions
+---
 
-- **M6 — Batch operations:** scheduling, restartability, idempotency, and the remaining `GraphIndexRebuildJob`, `ModelSyncJob`, and `OfflineEvalJob` jobs.
-- **M7 — Observability and quality:** per-stage timers/counters, Prometheus/Grafana dashboards, cache metrics, model/version tags, and recurring offline-quality reports.
-- **M8 — Portfolio release:** one-command startup, production-style configuration/secrets guidance, load-test evidence for the latency target, architecture/runbook documentation, and a reproducible baseline-vs-pipeline evaluation report.
+## Week 6 — Kafka Event Backbone (M6, post-Day-30)
+
+Kafka is intentionally scheduled after the recommendation pipeline so it adds
+freshness and operational realism without blocking the first complete product.
+PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
+
+**Day 31 — Kafka infrastructure + versioned contracts**
+- Add a single-broker Kafka development service and health check to Docker Compose, plus Spring Kafka/Testcontainers dependencies in a dedicated `pymk-event-stream` module.
+- Define compatibility-tested JSON Schema envelopes for `pymk.member-events.v1` and `pymk.connection-events.v1`, including stable IDs, event/ingestion timestamps, subject/target IDs, correlation ID, and schema version.
+
+**Day 32 — Transactional outbox + publisher**
+- Add an `event_outbox` migration and write domain data plus the outbox record in one PostgreSQL transaction.
+- Implement a restart-safe relay that publishes with broker acknowledgements, records publication state, and safely retries without losing events.
+
+**Day 33 — Idempotent consumers + failure handling**
+- Consume with at-least-once delivery, transactional database updates, and an `eventId` idempotency record before committing offsets.
+- Add bounded exponential-backoff retries and versioned dead-letter topics that retain original record metadata and the failure reason.
+
+**Day 34 — Streaming feature freshness + cache invalidation**
+- Project recent profile-view and invite counters into a timestamped online feature projection without allowing older events to overwrite newer state.
+- Consume connection events for targeted cache invalidation while preserving the existing synchronous invalidation as a correctness safeguard until Kafka reliability is demonstrated.
+- Reconcile streaming state from the nightly `FeatureComputationJob` so replay and recovery cannot create permanent drift.
+
+**Day 35 — Kafka resilience, observability, and runbook**
+- Add end-to-end Testcontainers tests covering API → database/outbox → Kafka → consumer/projection, duplicates, retries, dead-letter routing, ordering per key, and broker/consumer restarts.
+- Publish metrics for outbox and consumer lag, throughput, retry/dead-letter counts, processing latency, and projection freshness.
+- Document local operation, topic creation/retention, replay, dead-letter recovery, schema evolution, and failure-mode behavior.
+
+### Remaining post-Day-30 extensions
+
+- **M7 — Batch operations:** scheduling, restartability, idempotency, Kafka-to-batch reconciliation, and the remaining `GraphIndexRebuildJob`, `ModelSyncJob`, and `OfflineEvalJob` jobs.
+- **M8 — Observability and quality:** per-stage timers/counters, Prometheus/Grafana dashboards, cache and Kafka metrics, model/version tags, and recurring offline-quality reports.
+- **M9 — Portfolio release:** one-command startup including Kafka, production-style configuration/secrets guidance, load-test evidence for the latency target, architecture/runbook documentation, and a reproducible baseline-vs-pipeline evaluation report.
 
 ---
 
 ## How to use this roadmap
 - Each day is scoped to end with something runnable and verified.
-- If a day's task balloons, use the Day 7/14/21/28 buffer slots before moving milestone boundaries.
+- If a day's task balloons, use the Day 7/14/21/28 buffer slots before moving milestone boundaries; post-Day-30 milestones should move as a unit rather than weakening their reliability acceptance criteria.
 - Treat Weeks 1–2 as non-negotiable (they're your portfolio's minimum viable demo); Weeks 3–5 are what make it *interesting* to an interviewer.

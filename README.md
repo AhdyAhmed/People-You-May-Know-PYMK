@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 15 of 30 complete.** The M1 foundation and M2 naive-v1
-> recommendation pipeline are live; M3 feature-store persistence is now implemented and tested.
+> 🚧 **Status: Day 16 of 30 complete.** The M1 foundation and M2 naive-v1
+> recommendation pipeline are live; M3 now has snapshot-safe feature-store computation.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 15 checkpoint, the
+The diagram is the end-state funnel. At the current Day 16 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -143,7 +143,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
-`pymk-orchestrator`, and `pymk-feature-store` have real content as of Day 15.
+`pymk-orchestrator`, and `pymk-feature-store` have real content as of Day 16.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -225,7 +225,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 15: feature-store persistence complete"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 16: feature computation complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -436,7 +436,11 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       directional `PairId`, `PymkPairFeature`, Spring Data persistence,
       leakage-safe `featureAsOf` plus audit `computedAt`, database constraints,
       reset-path compatibility, and real-PostgreSQL integration tests.
-- [ ] ... see the roadmap for the full 30-day plan through M8.
+- [x] **Day 16 — Feature computation**: snapshot-bounded mutual connections,
+      exact nonblank profile matches, pgvector-backed cosine similarity,
+      directional 30-day profile-view counts, future-signal exclusion, pure
+      calculator tests, and real-PostgreSQL/pgvector integration coverage.
+- [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License
 

@@ -1,6 +1,8 @@
 package com.ahdyahmed.pymk.domain.repository;
 
 import com.ahdyahmed.pymk.domain.entity.MemberEmbedding;
+import java.time.Instant;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -11,4 +13,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * expresses cleanly.
  */
 public interface MemberEmbeddingRepository extends JpaRepository<MemberEmbedding, Long> {
+
+    /** Returns an embedding only when it was available at the requested snapshot. */
+    Optional<MemberEmbedding> findByMemberIdAndUpdatedAtLessThanEqual(Long memberId, Instant asOf);
 }

@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: pymk-batch
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pymk
+    username: pymk
+    password: pymk
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  batch:
+    job:
+      name: featureComputationJob
+    jdbc:
+      initialize-schema: never
+
+pymk:
+  batch:
+    feature-computation:
+      chunk-size: 10
+      fetch-size: 100
+      graph-candidate-limit: 2000
+      heuristic-candidate-limit: 1000
+      embedding-candidate-limit: 1000
+      global-candidate-limit: 3000

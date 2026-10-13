@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 16 complete; Day 17 is next. Target-architecture
+**Current checkpoint:** Day 17 complete; Day 18 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -104,9 +104,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Defined the profile-view window as `(featureAsOf - 30 days, featureAsOf]` and rejected missing/not-yet-created pair members and snapshots later than computation time.
 - Added pure unit tests plus real-PostgreSQL/pgvector integration coverage for all signals, directionality, time boundaries, future-data exclusion, missing embeddings, and invalid inputs.
 
-**Day 17 — `FeatureComputationJob` (Spring Batch)**
-- First real Spring Batch job: chunk-process active member pairs, compute features strictly as of the configured snapshot time, and write into `pymk_features`.
-- Run it against your synthetic dataset; confirm row counts and spot-check values.
+**Day 17 — `FeatureComputationJob` (Spring Batch) ✅**
+- Turned `pymk-batch` into a runnable Spring Boot/Spring Batch application with a required, validated `featureAsOf` parameter, job-owned `computedAt`, and Flyway-managed Batch metadata (V4).
+- Added a restartable cursor over members that existed at the snapshot and bounded, snapshot-safe candidate retrieval from two/three-hop graph walks, exact profile matches, and pgvector similarity; self, direct, future, and duplicate candidates are excluded.
+- Chunk-computed Day 16 features with non-regressing PostgreSQL upserts; stale older snapshots are deleted only in a final step after successful materialization, preserving the last good snapshot when computation fails.
+- Ran the complete job repeatedly against a deterministic synthetic PostgreSQL/pgvector fixture and verified completion, feature values, time boundaries, stale-row cleanup, stable row counts, parameter rejection, rerun idempotency, and rejection of an older snapshot.
 
 **Day 18 — Label generation for training**
 - Define observation and label windows; a positive is an `INVITE_ACCEPTED` after the feature snapshot and within the label window.

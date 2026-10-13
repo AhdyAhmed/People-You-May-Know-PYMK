@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 16 of 30 complete.** The M1 foundation and M2 naive-v1
-> recommendation pipeline are live; M3 now has snapshot-safe feature-store computation.
+> 🚧 **Status: Day 17 of 30 complete.** The M1 foundation and M2 naive-v1
+> recommendation pipeline are live; M3 now has restartable feature materialization.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 16 checkpoint, the
+The diagram is the end-state funnel. At the current Day 17 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -143,7 +143,7 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
-`pymk-orchestrator`, and `pymk-feature-store` have real content as of Day 16.
+`pymk-orchestrator`, `pymk-feature-store`, and `pymk-batch` have real content as of Day 17.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -159,6 +159,7 @@ the entity mappings against them instead of creating or changing tables.
 | `member_events` | Timestamped profile, search, and invite activity | Actor and target must exist; generated invite lifecycles are temporally ordered |
 | `member_embeddings` | One 128-dimensional pgvector embedding per member | Uses an HNSW cosine index; current vectors are random normalized placeholders |
 | `pymk_features` | Directional member-candidate feature snapshots | Composite pair key, non-negative counts, bounded cosine similarity, and `feature_as_of <= computed_at` |
+| `batch_*` | Spring Batch job/step execution and restart metadata | Flyway V4 owns the official PostgreSQL metadata schema |
 
 `ConnectionService` owns the two-row connection invariant and writes both
 directions in one transaction. Application code should not create a single
@@ -225,7 +226,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 16: feature computation complete"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 17: feature batch materialization complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -234,6 +235,22 @@ curl -X POST http://localhost:8080/api/v1/connections \
   -d '{"memberId": 42, "connectedMemberId": 981}'   # Day 6, Part 2
 # Browse to http://localhost:8080/swagger-ui.html for interactive API docs
 ```
+
+Run the Day 17 feature materialization after seeding. `featureAsOf` is a
+required ISO-8601 instant; the job records `computedAt` from its own UTC clock,
+and `run.id` identifies an intentional rerun:
+
+```powershell
+$snapshot = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+$runId = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+java -jar pymk-batch/target/pymk-batch.jar "featureAsOf=$snapshot" "run.id=$runId"
+```
+
+The job reads only snapshot-eligible members and bounded L0-style candidates,
+uses non-regressing upserts in configurable chunks, and removes older snapshots
+only after successful materialization. A failed run can be restarted with the
+same parameters without discarding the last completed snapshot; snapshots older
+than the latest completed materialization are rejected.
 
 ## API (Day 6)
 
@@ -440,6 +457,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       exact nonblank profile matches, pgvector-backed cosine similarity,
       directional 30-day profile-view counts, future-signal exclusion, pure
       calculator tests, and real-PostgreSQL/pgvector integration coverage.
+- [x] **Day 17 — Spring Batch feature materialization**: runnable batch app,
+      Flyway-managed restart metadata, snapshot-safe bounded candidate input,
+      chunked feature upserts, post-success stale-snapshot cleanup, validated
+      job parameters, and repeat-run PostgreSQL/pgvector integration coverage.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

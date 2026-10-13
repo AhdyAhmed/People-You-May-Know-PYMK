@@ -1,8 +1,6 @@
 /**
- * Spring Batch jobs: nightly feature computation, embedding refresh, graph index rebuild, model sync, offline eval.
- *
- * <p>Deliberately empty on Day 1 - this module exists so the multi-module
- * build wiring, dependency graph, and package layout are correct before any
- * real logic lands (see PYMK_ROADMAP.md, Week 1).</p>
+ * Runnable Spring Batch jobs. Day 17 provides restartable, snapshot-safe
+ * feature computation; later milestones add embedding, graph, model-sync, and
+ * offline-evaluation jobs.
  */
 package com.ahdyahmed.pymk.batch;

@@ -44,10 +44,11 @@ status differ.
 | M2 naive-v1 release contract and runnable documentation | Completed on Day 14 |
 | Directional pair-feature schema, entity, repository, and snapshot contract | Implemented on Day 15 |
 | Snapshot-safe pair-feature computation | Implemented on Day 16 |
-| Feature batch materialization, rankers, and re-ranker | Planned for Days 17+ |
+| Restartable Spring Batch feature materialization | Implemented on Day 17 |
+| Label generation, rankers, and re-ranker | Planned for Days 18+ |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 16 complete**. Target-only sections below use
+The current checkpoint is **Day 17 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -367,11 +368,31 @@ sequenceDiagram
 
 | Job | Frequency | Purpose |
 |---|---|---|
-| `FeatureComputationJob` | nightly | Recompute `pymk_features` (mutual connections, same-company flags, embedding similarity) for active member pairs |
+| `FeatureComputationJob` | nightly | **Implemented Day 17:** recompute `pymk_features` for bounded, snapshot-eligible member pairs |
 | `EmbeddingRefreshJob` | weekly | Recompute member embeddings (e.g. node2vec-style over the connection graph, or a simple profile-text embedding) |
 | `GraphIndexRebuildJob` | daily | Materialize/refresh any denormalized adjacency structures used by L0 |
 | `ModelSyncJob` | on model release | Pull latest ONNX/PMML model artifact from the model registry (could just be a versioned S3/local path for a portfolio project) into `pymk-heavy-ranker` / `pymk-light-ranker` |
 | `OfflineEvalJob` | weekly | Compute Recall@k / AUC / Precision@k against a held-out labeled set, log to a metrics table for a "model quality over time" dashboard |
+
+`FeatureComputationJob` requires an ISO-8601 `featureAsOf` job parameter and
+records `computedAt` from its own UTC clock. Future snapshots are rejected. Its
+restartable cursor reads only members created by the snapshot. For each member,
+bounded two/three-hop graph,
+exact profile, and pgvector sources form a deterministic candidate union using
+only connections, members, and embeddings available at the snapshot; self,
+already-connected, future, and duplicate candidates are excluded before the
+global cap.
+
+The preflight step rejects a snapshot older than the newest materialized one.
+The computation step uses conditional PostgreSQL upserts that cannot overwrite
+a newer pair row, and the final step deletes rows older than the completed
+snapshot. A failed computation therefore leaves the previous good snapshot
+available. Spring Batch execution and restart state lives in Flyway V4 metadata
+tables. Reusing all identifying parameters
+restarts a failed instance or refuses an already-completed instance; an explicit
+`run.id` creates an intentional rerun. Chunk size, cursor fetch size, per-source
+candidate limits, and the global cap are configurable under
+`pymk.batch.feature-computation`.
 
 ### 7.1 Kafka event pipeline (planned M6)
 
@@ -498,7 +519,7 @@ A/B test or production CTR lift.
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: directional persistence and snapshot-safe pair-feature computation are complete through Day 16; batch materialization, model training, and light-ranker serving follow.
+3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, and restartable batch materialization are complete through Day 17; label generation, model training, and light-ranker serving follow.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.

@@ -45,10 +45,11 @@ status differ.
 | Directional pair-feature schema, entity, repository, and snapshot contract | Implemented on Day 15 |
 | Snapshot-safe pair-feature computation | Implemented on Day 16 |
 | Restartable Spring Batch feature materialization | Implemented on Day 17 |
-| Label generation, rankers, and re-ranker | Planned for Days 18+ |
+| Leakage-safe labeled training-data export | Implemented on Day 18 |
+| Model training, rankers, and re-ranker | Planned for Days 19+ |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 17 complete**. Target-only sections below use
+The current checkpoint is **Day 18 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -369,6 +370,7 @@ sequenceDiagram
 | Job | Frequency | Purpose |
 |---|---|---|
 | `FeatureComputationJob` | nightly | **Implemented Day 17:** recompute `pymk_features` for bounded, snapshot-eligible member pairs |
+| `TrainingDatasetExportJob` | after a label window matures | **Implemented Day 18:** export snapshot features and future-window acceptance labels to deterministic CSV |
 | `EmbeddingRefreshJob` | weekly | Recompute member embeddings (e.g. node2vec-style over the connection graph, or a simple profile-text embedding) |
 | `GraphIndexRebuildJob` | daily | Materialize/refresh any denormalized adjacency structures used by L0 |
 | `ModelSyncJob` | on model release | Pull latest ONNX/PMML model artifact from the model registry (could just be a versioned S3/local path for a portfolio project) into `pymk-heavy-ranker` / `pymk-light-ranker` |
@@ -393,6 +395,25 @@ restarts a failed instance or refuses an already-completed instance; an explicit
 `run.id` creates an intentional rerun. Chunk size, cursor fetch size, per-source
 candidate limits, and the global cap are configurable under
 `pymk.batch.feature-computation`.
+
+`TrainingDatasetExportJob` requires the exact `featureAsOf` snapshot, a
+`labelWindowEnd`, and an `outputPath`. The observation window defaults to the
+30 days ending at the snapshot. The label window is `(featureAsOf,
+labelWindowEnd]`: only a directional `INVITE_ACCEPTED` from the member to the
+candidate inside that interval produces label `1`. An acceptance exactly at
+the snapshot, after the label cutoff, in the reverse direction, or with a
+different event type cannot affect the label. The job refuses incomplete
+future label windows and snapshots with no feature rows so unknown outcomes
+are not silently encoded as negatives. Flyway V5 provides the directional
+pair/type/time event index used by this bounded outcome lookup.
+
+Rows are ordered by snapshot, member ID, and candidate ID and contain the full
+feature vector plus observation/label boundaries and the binary label. A
+restartable cursor and chunk writer write an execution-private staging file;
+only the final step atomically replaces the requested CSV. A failed export
+therefore cannot publish a partial dataset or destroy the last good artifact.
+Chunk size, fetch size, and observation duration are configurable under
+`pymk.batch.training-export`.
 
 ### 7.1 Kafka event pipeline (planned M6)
 
@@ -498,10 +519,11 @@ Following the blog directly:
 - **End-to-end** → since this is a portfolio project without real users, run a replay evaluation on a held-out future time window, comparing the multi-stage pipeline against a mutual-connections baseline.
 
 All features must be computed as of a snapshot time, with labels taken only
-from a later window. Random row splits or features computed after an invite was
-accepted would leak the outcome and make reported lift meaningless. Synthetic
-results are labeled as offline replay metrics, not presented as a real online
-A/B test or production CTR lift.
+from a later window. **Implemented on Day 18:** the training export enforces
+this boundary and refuses an immature label window. Random row splits or
+features computed after an invite was accepted would leak the outcome and make
+reported lift meaningless. Synthetic results are labeled as offline replay
+metrics, not presented as a real online A/B test or production CTR lift.
 
 ---
 
@@ -519,7 +541,7 @@ A/B test or production CTR lift.
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, and restartable batch materialization are complete through Day 17; label generation, model training, and light-ranker serving follow.
+3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, and leakage-safe label export are complete through Day 18; model training and light-ranker serving follow.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.

@@ -22,6 +22,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
@@ -30,6 +31,7 @@ import org.springframework.batch.core.JobParametersValidator;
 import org.springframework.batch.test.JobLauncherTestUtils;
 import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
@@ -56,6 +58,7 @@ class FeatureComputationJobTest {
     private static final Instant COMPUTED_AT = AS_OF.plus(10, ChronoUnit.MINUTES);
 
     @Autowired JobLauncherTestUtils jobs;
+    @Autowired @Qualifier("featureComputationJob") Job featureComputationJob;
     @Autowired SnapshotCandidateRepository candidates;
     @Autowired JobParametersValidator featureComputationJobParametersValidator;
     @Autowired MemberRepository members;
@@ -66,6 +69,7 @@ class FeatureComputationJobTest {
 
     @BeforeEach
     void seedSnapshot() {
+        jobs.setJob(featureComputationJob);
         features.deleteAllInBatch();
         embeddings.deleteAllInBatch();
         events.deleteAllInBatch();

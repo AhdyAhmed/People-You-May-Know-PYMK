@@ -29,3 +29,7 @@ pymk:
       heuristic-candidate-limit: 1000
       embedding-candidate-limit: 1000
       global-candidate-limit: 3000
+    training-export:
+      chunk-size: 1000
+      fetch-size: 1000
+      observation-window: 30d

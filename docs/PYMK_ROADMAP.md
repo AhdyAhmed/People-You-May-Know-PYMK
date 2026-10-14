@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 17 complete; Day 18 is next. Target-architecture
+**Current checkpoint:** Day 18 complete; Day 19 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -110,9 +110,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Chunk-computed Day 16 features with non-regressing PostgreSQL upserts; stale older snapshots are deleted only in a final step after successful materialization, preserving the last good snapshot when computation fails.
 - Ran the complete job repeatedly against a deterministic synthetic PostgreSQL/pgvector fixture and verified completion, feature values, time boundaries, stale-row cleanup, stable row counts, parameter rejection, rerun idempotency, and rejection of an older snapshot.
 
-**Day 18 — Label generation for training**
-- Define observation and label windows; a positive is an `INVITE_ACCEPTED` after the feature snapshot and within the label window.
-- Export a temporally ordered labeled dataset (features + label) to CSV/Parquet without post-outcome leakage.
+**Day 18 — Label generation for training ✅**
+- Added the restartable `TrainingDatasetExportJob` with an explicit feature snapshot, a configurable 30-day observation window, and a required mature `labelWindowEnd`; future or reversed windows and missing feature snapshots are rejected.
+- Labeled a directional pair positive only when its `INVITE_ACCEPTED` occurs strictly after `featureAsOf` and at or before `labelWindowEnd`, excluding snapshot-boundary, post-window, reverse-direction, and non-acceptance events; Flyway V5 adds the pair/type/time lookup index.
+- Exported deterministic, temporally ordered CSV rows containing the complete Day 16 feature vector, window metadata, and a binary label through a restartable cursor/chunk writer.
+- Wrote to an execution-private staging file and promoted it only after success, preserving the previous artifact on failure; real-PostgreSQL integration coverage verifies boundary safety, ordering, rerun determinism, validation, and cleanup of staging files.
 
 **Day 19 — Train logistic regression offline**
 - Small Python (or Tribuo, if going pure-Java) script: train a logistic regression / XGBoost model on the exported dataset.

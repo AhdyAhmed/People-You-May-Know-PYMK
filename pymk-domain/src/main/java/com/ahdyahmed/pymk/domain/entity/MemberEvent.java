@@ -27,7 +27,9 @@ import java.util.Objects;
         indexes = {
                 @Index(name = "idx_event_actor", columnList = "actor_member_id"),
                 @Index(name = "idx_event_target_type", columnList = "target_member_id, type"),
-                @Index(name = "idx_event_occurred_at", columnList = "occurred_at")
+                @Index(name = "idx_event_occurred_at", columnList = "occurred_at"),
+                @Index(name = "idx_event_pair_type_time",
+                        columnList = "actor_member_id, target_member_id, type, occurred_at")
         }
 )
 public class MemberEvent {

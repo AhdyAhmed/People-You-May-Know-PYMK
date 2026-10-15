@@ -28,8 +28,9 @@ logs/
 # Python (pymk-ml-training, Week 3+)
 pymk-ml-training/venv/
 pymk-ml-training/.venv/
-pymk-ml-training/__pycache__/
-pymk-ml-training/*.pyc
+**/__pycache__/
+*.py[cod]
+*.egg-info/
 pymk-ml-training/.ipynb_checkpoints/
 
 # Exported model / data artifacts (Week 3+) — regenerate locally, don't commit
@@ -37,6 +38,7 @@ pymk-ml-training/.ipynb_checkpoints/
 *.pmml
 *.parquet
 /data/
+/artifacts/
 
 # Docker
 infra/**/pgdata/

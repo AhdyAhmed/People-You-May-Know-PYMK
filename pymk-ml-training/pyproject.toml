@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymk-ml-training"
+version = "0.1.0"
+description = "Reproducible offline model training for the PYMK recommender"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26,<3",
+    "onnx>=1.17,<2",
+    "onnxruntime>=1.20,<2",
+    "scikit-learn>=1.5,<2",
+    "skl2onnx>=1.18,<2",
+]
+
+[project.scripts]
+pymk-train-light-ranker = "pymk_training.train_light_ranker:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

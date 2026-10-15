@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 18 of 30 complete.** The M1 foundation and M2 naive-v1
-> recommendation pipeline are live; M3 now has leakage-safe training-data export.
+> 🚧 **Status: Day 19 of 30 complete.** The M1 foundation and M2 naive-v1
+> recommendation pipeline are live; M3 now has a trained, exportable L1 model.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 18 checkpoint, the
+The diagram is the end-state funnel. At the current Day 19 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
 re-ranking are scheduled later in the roadmap.
@@ -119,7 +119,7 @@ API, so it should not be exposed publicly as-is.
 | ML training | Python (scikit-learn/XGBoost/PyTorch) → ONNX/PMML |
 | ML serving | ONNX Runtime Java / JPMML-Evaluator |
 | Build | Maven multi-module |
-| Testing | JUnit 5, Testcontainers, Mockito |
+| Testing | JUnit 5, Testcontainers, Mockito, Python `unittest`, ONNX Runtime parity checks |
 | Local infra | Docker Compose (Postgres + pgvector, Redis) |
 
 ## Repository layout
@@ -143,7 +143,8 @@ pymk/
 ```
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
-`pymk-orchestrator`, `pymk-feature-store`, and `pymk-batch` have real content as of Day 18.
+`pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
+`pymk-ml-training` have real content as of Day 19.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -226,7 +227,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 18: training dataset export complete"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 19: L1 model training complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -273,6 +274,28 @@ features, the 30-day observation boundary, the label boundary, and `label=1`
 only for `INVITE_ACCEPTED` events in `(featureAsOf, labelWindowEnd]`. Export
 uses a private staging file and replaces the final artifact only after all rows
 are written successfully.
+
+Train the Day 19 L1 model after collecting at least three exports with distinct
+snapshots. Whole snapshots—not individual rows—are assigned chronologically to
+train, validation, and test partitions:
+
+```powershell
+cd pymk-ml-training
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\python -m pymk_training.train_light_ranker `
+  --input ..\artifacts\training\snapshot-2026-08-01.csv `
+  --input ..\artifacts\training\snapshot-2026-08-08.csv `
+  --input ..\artifacts\training\snapshot-2026-08-15.csv `
+  --output-dir ..\artifacts\models\light-ranker `
+  --model-version light-logreg-v1
+```
+
+The command publishes `light-logreg-v1.onnx` and a matching metadata JSON only
+after the ONNX graph passes validation and its probabilities match the fitted
+scikit-learn pipeline. See
+[`pymk-ml-training/README.md`](pymk-ml-training/README.md) for the complete
+contract and verification command.
 
 ## API (Day 6)
 
@@ -487,6 +510,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       windows, directional acceptance labels, deterministic CSV ordering,
       restartable chunk processing, atomic publication, parameter validation,
       and repeat-run PostgreSQL integration coverage.
+- [x] **Day 19 — L1 model training**: strict multi-snapshot CSV validation,
+      whole-snapshot chronological splits, scaled class-balanced logistic
+      regression, ONNX export/runtime parity verification, atomic artifacts,
+      audit metadata, Python tests, and CI coverage.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

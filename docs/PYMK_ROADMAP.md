@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 18 complete; Day 19 is next. Target-architecture
+**Current checkpoint:** Day 19 complete; Day 20 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -116,10 +116,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Exported deterministic, temporally ordered CSV rows containing the complete Day 16 feature vector, window metadata, and a binary label through a restartable cursor/chunk writer.
 - Wrote to an execution-private staging file and promoted it only after success, preserving the previous artifact on failure; real-PostgreSQL integration coverage verifies boundary safety, ordering, rerun determinism, validation, and cleanup of staging files.
 
-**Day 19 — Train logistic regression offline**
-- Small Python (or Tribuo, if going pure-Java) script: train a logistic regression / XGBoost model on the exported dataset.
-- Use time-based train/validation/test splits rather than random row splits.
-- Export as PMML or ONNX.
+**Day 19 — Train logistic regression offline ✅**
+- Turned `pymk-ml-training` into an installable Python 3.11+ project that strictly validates and combines Day 18 CSV exports, rejects schema/temporal drift and duplicate snapshot pairs, and trains a class-balanced, scaled logistic-regression baseline with a fixed seed.
+- Added chronological train/validation/test splitting at the whole-snapshot level, requiring at least three distinct `feature_as_of` values so no snapshot can cross partition boundaries.
+- Exported the scaler plus classifier to an ONNX opset-17 model and atomically published a metadata report containing feature order, input hashes, temporal boundaries, metrics, coefficients, runtime versions, and the model SHA-256.
+- Validated the ONNX graph and executed it with ONNX Runtime, requiring its probabilities to match scikit-learn; automated tests cover temporal isolation, invalid inputs, artifact contracts, and end-to-end training/export. CI now verifies the Python project alongside the Maven reactor.
 
 **Day 20 — `pymk-light-ranker` serving**
 - Load the exported model via JPMML-Evaluator or ONNX Runtime Java.

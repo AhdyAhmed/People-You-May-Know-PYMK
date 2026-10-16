@@ -13,6 +13,16 @@ public interface PymkPairFeatureRepository extends JpaRepository<PymkPairFeature
 
     List<PymkPairFeature> findByIdMemberIdOrderByIdCandidateId(long memberId);
 
+    /** Fetches the serving feature rows for one L0 batch without an N+1 query. */
+    @Query("""
+            select feature from PymkPairFeature feature
+            where feature.id.memberId = :memberId
+              and feature.id.candidateId in :candidateIds
+            """)
+    List<PymkPairFeature> findForCandidates(
+            @Param("memberId") long memberId,
+            @Param("candidateIds") List<Long> candidateIds);
+
     @Query("select max(feature.featureAsOf) from PymkPairFeature feature")
     Optional<Instant> findLatestFeatureAsOf();
 

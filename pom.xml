@@ -26,6 +26,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- Not managed by the Spring Boot BOM. 2.8.x targets Spring Boot 3.4/3.5. -->
     <springdoc.version>2.8.9</springdoc.version>
+    <onnxruntime.version>1.30.0</onnxruntime.version>
   </properties>
 
   <modules>

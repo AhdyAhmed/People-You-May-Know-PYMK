@@ -76,6 +76,19 @@ class PymkPairFeatureRepositoryTest {
     }
 
     @Test
+    void fetchesOnlyTheRequestedServingBatch() {
+        repository.saveAllAndFlush(List.of(
+                feature(new PairId(MEMBER, CANDIDATE_ONE), 3, true, false, false, 0.3, 1),
+                feature(new PairId(MEMBER, CANDIDATE_TWO), 4, false, true, false, 0.4, 2),
+                feature(new PairId(CANDIDATE_ONE, MEMBER), 5, false, false, true, 0.5, 3)));
+        entityManager.clear();
+
+        assertThat(repository.findForCandidates(MEMBER, List.of(CANDIDATE_TWO)))
+                .extracting(row -> row.getId().getCandidateId())
+                .containsExactly(CANDIDATE_TWO);
+    }
+
+    @Test
     void javaContractRejectsInvalidKeysSignalsAndTemporalLeakage() {
         assertThatIllegalArgumentException().isThrownBy(() -> new PairId(0, CANDIDATE_ONE));
         assertThatIllegalArgumentException().isThrownBy(() -> new PairId(MEMBER, MEMBER));

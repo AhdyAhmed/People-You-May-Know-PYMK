@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 19 of 30 complete.** The M1 foundation and M2 naive-v1
-> recommendation pipeline are live; M3 now has a trained, exportable L1 model.
+> 🚧 **Status: Day 20 of 30 complete.** The M1 foundation and M2 naive-v1
+> recommendation pipeline are live; M3 now has trained and Java-served L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,10 +29,11 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 19 checkpoint, the
+The diagram is the end-state funnel. At the current Day 20 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
-pipeline plus the naive orchestrator and Redis caching are implemented. L1–L2 and
-re-ranking are scheduled later in the roadmap.
+pipeline plus the naive orchestrator and Redis caching are implemented. L1 is
+implemented as a standalone serving stage; Day 21 wires it into the public
+pipeline. L2 and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -144,7 +145,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training` have real content as of Day 19.
+`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 20.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -227,7 +228,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 19: L1 model training complete"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 20: L1 serving complete"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -296,6 +297,24 @@ after the ONNX graph passes validation and its probabilities match the fitted
 scikit-learn pipeline. See
 [`pymk-ml-training/README.md`](pymk-ml-training/README.md) for the complete
 contract and verification command.
+
+Day 20 consumes that pair of artifacts in `pymk-light-ranker`. The Java loader
+verifies the metadata schema, feature order, tensor types/shapes, positive
+class, and model checksum before creating a serving session. Its defaults are:
+
+```yaml
+pymk:
+  light-ranker:
+    model-path: artifacts/models/light-ranker/light-logreg-v1.onnx
+    metadata-path: artifacts/models/light-ranker/light-logreg-v1.metadata.json
+    max-candidates: 500
+```
+
+`L1LightRanker.rank` performs one feature-store query and one ONNX inference
+for the entire L0 batch, rejects missing or mixed-snapshot features, and
+preserves candidate provenance in its deterministic top-K result. This stage
+is intentionally not used by the public endpoint until the Day 21 orchestrator
+cutover, so the running API remains on the documented naive ordering today.
 
 ## API (Day 6)
 
@@ -514,6 +533,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       whole-snapshot chronological splits, scaled class-balanced logistic
       regression, ONNX export/runtime parity verification, atomic artifacts,
       audit metadata, Python tests, and CI coverage.
+- [x] **Day 20 — L1 model serving**: ONNX Runtime Java loading, strict artifact
+      and tensor-contract checks, batched feature lookup/inference,
+      deterministic configurable top-K ranking, fail-closed snapshot coverage,
+      and real cross-language model execution tests.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

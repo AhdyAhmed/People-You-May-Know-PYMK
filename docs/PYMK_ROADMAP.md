@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 19 complete; Day 20 is next. Target-architecture
+**Current checkpoint:** Day 20 complete; Day 21 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -122,9 +122,11 @@ alone does not mark a day complete when the behavior can be automated.
 - Exported the scaler plus classifier to an ONNX opset-17 model and atomically published a metadata report containing feature order, input hashes, temporal boundaries, metrics, coefficients, runtime versions, and the model SHA-256.
 - Validated the ONNX graph and executed it with ONNX Runtime, requiring its probabilities to match scikit-learn; automated tests cover temporal isolation, invalid inputs, artifact contracts, and end-to-end training/export. CI now verifies the Python project alongside the Maven reactor.
 
-**Day 20 — `pymk-light-ranker` serving**
-- Load the exported model via JPMML-Evaluator or ONNX Runtime Java.
-- Implement `L1LightRanker.rank(memberId, candidates)` → top ~500.
+**Day 20 — `pymk-light-ranker` serving ✅**
+- Added ONNX Runtime Java model loading with strict validation of the Day 19 metadata schema, six-feature order, input/output tensor contracts, positive class, and model SHA-256; incompatible or corrupted artifacts fail before serving.
+- Implemented `L1LightRanker.rank(memberId, candidates)` with one batched feature-store query and one batched inference call, preserving L0 provenance while returning a configurable top 500 by calibrated probability.
+- Made ties deterministic with L0 fusion score and candidate ID, rejected missing features and mixed snapshots instead of serving partial results, and exposed Spring configuration for model/metadata paths and the output cap.
+- Added real PostgreSQL query coverage, unit coverage for feature order/ranking/failure paths, and a cross-language test that loads and scores an actual model exported by the Day 19 Python pipeline.
 
 **Day 21 — Wire L1 into orchestrator + buffer**
 - Orchestrator now calls L0 → L1 instead of L0 → naive sort.

@@ -47,10 +47,11 @@ status differ.
 | Restartable Spring Batch feature materialization | Implemented on Day 17 |
 | Leakage-safe labeled training-data export | Implemented on Day 18 |
 | Chronological L1 logistic-regression training and ONNX export | Implemented on Day 19 |
-| L1 serving, heavy ranker, and re-ranker | Planned for Days 20+ |
+| Batched, contract-validated ONNX L1 serving | Implemented on Day 20 |
+| Orchestrator L1 integration, heavy ranker, and re-ranker | Planned for Days 21+ |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 19 complete**. Target-only sections below use
+The current checkpoint is **Day 20 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ---
@@ -310,7 +311,8 @@ partially generated list. This mutual-count value is the temporary public
 
 - **Implemented on Day 19:** a class-balanced logistic regression consumes the Day 18 feature/label contract after standard scaling. Whole `feature_as_of` snapshots are assigned chronologically to train, validation, and test partitions; random row splitting is prohibited.
 - The trainer exports an ONNX opset-17 graph and metadata with the exact six-feature order, scaler values, coefficients, split boundaries, input/model hashes, metrics, and runtime versions. It executes the exported graph and compares probabilities with scikit-learn before publishing artifacts atomically.
-- **Day 20 serving boundary:** `pymk-light-ranker` loads the versioned ONNX artifact with ONNX Runtime Java and narrows the L0 set. Metadata is a compatibility/audit contract, not an alternate source of model truth.
+- **Implemented on Day 20:** `pymk-light-ranker` loads the versioned artifact once with ONNX Runtime Java and validates its SHA-256 plus metadata, feature order, input shape/type, and two-class probability output before accepting traffic. It batch-fetches all directional feature rows and scores the full request in one inference call.
+- `L1LightRanker` fails closed if a candidate is missing features, a batch mixes snapshots, or inference violates the output contract. It preserves L0 provenance and returns at most 500 candidates (configurable), ordered by positive-class probability with fusion score and candidate ID as deterministic tie-breakers. Day 21 composes this stage into the public orchestrator; through Day 20, the API still serves the documented naive ordering.
 
 ### Stage L2 — Heavy Ranker
 **Goal:** precisely rank the few hundred remaining candidates. Evaluated by **AUC / Precision@k / ECE** (calibration matters because these scores feed the re-ranker).
@@ -542,7 +544,7 @@ metrics, not presented as a real online A/B test or production CTR lift.
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, and chronological ONNX model training are complete through Day 19; light-ranker serving follows.
+3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, and contract-validated batched Java serving are complete through Day 20; public orchestrator integration follows on Day 21.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.

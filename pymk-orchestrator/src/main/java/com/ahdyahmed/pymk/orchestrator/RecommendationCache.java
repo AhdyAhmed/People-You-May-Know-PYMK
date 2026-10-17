@@ -1,6 +1,7 @@
 package com.ahdyahmed.pymk.orchestrator;
 
 import com.ahdyahmed.pymk.candidategen.MergedCandidate;
+import com.ahdyahmed.pymk.lightranker.LightRankerException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,6 +9,8 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.HashSet;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -41,7 +44,16 @@ public class RecommendationCache {
         if (!properties.isEnabled()) {
             return Optional.empty();
         }
-        return read(candidateKey(memberId), json -> List.copyOf(objectMapper.readValue(json, CANDIDATE_LIST)));
+        return read(candidateKey(memberId), json -> {
+            List<MergedCandidate> candidates = List.copyOf(objectMapper.readValue(json, CANDIDATE_LIST));
+            HashSet<Long> ids = new HashSet<>();
+            for (MergedCandidate candidate : candidates) {
+                if (candidate.candidateId() == memberId || !ids.add(candidate.candidateId())) {
+                    throw new IllegalArgumentException("Cached candidates contain self or duplicate IDs");
+                }
+            }
+            return candidates;
+        });
     }
 
     public void putCandidates(long memberId, List<MergedCandidate> candidates) {
@@ -55,7 +67,30 @@ public class RecommendationCache {
         if (!properties.isEnabled()) {
             return Optional.empty();
         }
-        return read(resultKey(memberId), json -> objectMapper.readValue(json, RecommendationResult.class));
+        return read(resultKey(memberId), json -> {
+            RecommendationResult result = Objects.requireNonNull(
+                    objectMapper.readValue(json, RecommendationResult.class));
+            if (result.memberId() != memberId || result.recommendations().size() > RecommendationOrchestrator.MAX_RESULTS) {
+                throw new IllegalArgumentException("Cached result has the wrong owner or exceeds the result cap");
+            }
+            HashSet<Long> ids = new HashSet<>();
+            double previousScore = Double.POSITIVE_INFINITY;
+            for (Recommendation recommendation : result.recommendations()) {
+                if (recommendation.candidateId() == memberId || !ids.add(recommendation.candidateId())
+                        || recommendation.score() > previousScore) {
+                    throw new IllegalArgumentException("Cached result violates recommendation invariants");
+                }
+                previousScore = recommendation.score();
+            }
+            return result;
+        });
+    }
+
+    /** Check before reading either layer, including when a final result is already cached. */
+    public void verifyModelVersion(String loadedModelVersion) {
+        if (properties.isEnabled() && !Objects.equals(properties.getModelVersion(), loadedModelVersion)) {
+            throw new LightRankerException("Configured cache model version does not match the loaded L1 model");
+        }
     }
 
     public void putResult(long memberId, RecommendationResult result) {
@@ -114,6 +149,10 @@ public class RecommendationCache {
             return Optional.empty();
         } catch (JsonProcessingException ex) {
             log.warn("Discarding unreadable Redis cache entry {}: {}", key, ex.getOriginalMessage());
+            deleteQuietly(key);
+            return Optional.empty();
+        } catch (IllegalArgumentException | NullPointerException ex) {
+            log.warn("Discarding invalid Redis cache entry {}: {}", key, ex.getMessage());
             deleteQuietly(key);
             return Optional.empty();
         }

@@ -17,12 +17,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
 
 /** {@code GET /api/v1/members/{id}} end to end (MockMvc -> service -> real Postgres). */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
+@MockitoBean(types = LightRankerModel.class)
 @Transactional // each test rolls back its seed data
 class MemberControllerTest {
 

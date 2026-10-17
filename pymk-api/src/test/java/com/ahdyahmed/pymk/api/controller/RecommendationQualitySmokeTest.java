@@ -5,10 +5,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ahdyahmed.pymk.api.support.PostgresTestConfig;
+import com.ahdyahmed.pymk.api.support.LightRankerTestSupport;
 import com.ahdyahmed.pymk.domain.entity.Member;
 import com.ahdyahmed.pymk.domain.repository.ConnectionRepository;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
+import com.ahdyahmed.pymk.featurestore.PymkPairFeatureRepository;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -25,8 +28,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-/** Day 13 end-to-end quality gate for recommendation safety and baseline relevance. */
+/** End-to-end quality gate for Day 21 L1 ranking safety and baseline relevance. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
@@ -46,13 +50,16 @@ class RecommendationQualitySmokeTest {
     @Autowired MemberRepository members;
     @Autowired ConnectionRepository connections;
     @Autowired ConnectionService connectionService;
+    @Autowired PymkPairFeatureRepository features;
     @Autowired StringRedisTemplate redis;
+    @MockitoBean LightRankerModel lightRankerModel;
 
     @BeforeEach
     void seedSyntheticQaGraph() {
         flushRedis();
+        LightRankerTestSupport.configureModel(lightRankerModel);
         Instant joinedAt = Instant.parse("2026-01-15T10:00:00Z");
-        members.saveAll(List.of(
+        List<Member> fixtureMembers = List.of(
                 member(REQUESTER, "Requester", "Acme", "Cairo University", "Cairo", joinedAt),
                 member(FRIEND_ONE, "Friend One", "Other", "Other", "Giza", joinedAt),
                 member(FRIEND_TWO, "Friend Two", "Other", "Other", "Giza", joinedAt),
@@ -60,7 +67,8 @@ class RecommendationQualitySmokeTest {
                 member(ONE_MUTUAL, "Graph Candidate", "Other", "Other", "Alexandria", joinedAt),
                 member(PROFILE_MATCH, "Profile Candidate", "Acme", "Other", "Alexandria", joinedAt),
                 member(CONNECTED_PROFILE_MATCH, "Connected Coworker", "Acme", "Other", "Cairo", joinedAt),
-                member(UNRELATED, "Unrelated Member", "Unrelated", "Unrelated", "Aswan", joinedAt)));
+                member(UNRELATED, "Unrelated Member", "Unrelated", "Unrelated", "Aswan", joinedAt));
+        members.saveAll(fixtureMembers);
 
         connectionService.connect(REQUESTER, FRIEND_ONE, joinedAt);
         connectionService.connect(REQUESTER, FRIEND_TWO, joinedAt);
@@ -68,11 +76,13 @@ class RecommendationQualitySmokeTest {
         connectionService.connect(FRIEND_ONE, TWO_MUTUALS, joinedAt);
         connectionService.connect(FRIEND_TWO, TWO_MUTUALS, joinedAt);
         connectionService.connect(FRIEND_ONE, ONE_MUTUAL, joinedAt);
+        LightRankerTestSupport.materializeAllPairs(fixtureMembers, connections, features);
     }
 
     @AfterEach
     void cleanFixture() {
         flushRedis();
+        features.deleteAll();
         connections.deleteAll();
         members.deleteAll();
     }
@@ -135,11 +145,12 @@ class RecommendationQualitySmokeTest {
         assertThat(new HashSet<>(candidateIds)).hasSameSizeAs(candidateIds);
         assertThat(members.findAllById(candidateIds)).hasSameSizeAs(candidateIds);
 
-        long previousMutualCount = Long.MAX_VALUE;
+        double previousScore = Double.POSITIVE_INFINITY;
         for (JsonNode recommendation : recommendations) {
-            long mutualCount = recommendation.path("mutualConnectionCount").asLong();
-            assertThat(mutualCount).isLessThanOrEqualTo(previousMutualCount);
-            previousMutualCount = mutualCount;
+            double score = recommendation.path("score").asDouble();
+            assertThat(score).isBetween(0.0, 1.0);
+            assertThat(score).isLessThanOrEqualTo(previousScore);
+            previousScore = score;
         }
     }
 

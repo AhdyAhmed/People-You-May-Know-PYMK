@@ -32,7 +32,7 @@ public class PymkController {
 
     @GetMapping("/{memberId}")
     @Operation(summary = "Get people a member may know",
-            description = "Naive v1 baseline ordered by mutual connections; later ranking stages will replace the score.")
+            description = "L0 candidates ranked by the L1 model's positive-class connection probability.")
     @ApiResponse(responseCode = "200", description = "Recommendations generated")
     @ApiResponse(responseCode = "400", description = "Member ID or limit is invalid",
             content = @Content(mediaType = "application/problem+json",
@@ -40,7 +40,7 @@ public class PymkController {
     @ApiResponse(responseCode = "404", description = "No member with that ID",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
-    @ApiResponse(responseCode = "503", description = "A candidate source failed",
+    @ApiResponse(responseCode = "503", description = "Candidate generation, feature loading, or L1 scoring failed",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
     public PymkResponse getRecommendations(

@@ -33,10 +33,14 @@ pymk:
     enabled: true
     key-prefix: pymk
     schema-version: v1
-    pipeline-version: l0-rrf-v1
-    model-version: naive-mutual-v1
+    pipeline-version: l0-l1-v1
+    model-version: light-logreg-v1
     l0-ttl: 30m
     result-ttl: 15m
+  light-ranker:
+    model-path: ${PYMK_L1_MODEL_PATH:artifacts/models/light-ranker/light-logreg-v1.onnx}
+    metadata-path: ${PYMK_L1_METADATA_PATH:artifacts/models/light-ranker/light-logreg-v1.metadata.json}
+    max-candidates: 500
 
 server:
   port: 8080

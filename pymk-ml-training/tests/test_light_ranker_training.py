@@ -34,6 +34,8 @@ class LightRankerTrainingTest(unittest.TestCase):
             self.assertFalse(validation & test)
             self.assertLess(max(train), min(validation))
             self.assertLess(max(validation), min(test))
+            self.assertLessEqual(max(dataset.label_window_end[split.train]), min(validation))
+            self.assertLessEqual(max(dataset.label_window_end[split.validation]), min(test))
 
     def test_trainer_exports_valid_onnx_and_reproducible_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -52,6 +54,10 @@ class LightRankerTrainingTest(unittest.TestCase):
             self.assertEqual(32, persisted["rowCount"])
             self.assertEqual(6, len(persisted["features"]))
             self.assertEqual(6, len(persisted["parameters"]["coefficients"]))
+            self.assertLessEqual(persisted["split"]["trainLabelThroughInclusive"],
+                                 persisted["split"]["validation"]["fromInclusive"])
+            self.assertLessEqual(persisted["split"]["validationLabelThroughInclusive"],
+                                 persisted["split"]["test"]["fromInclusive"])
             self.assertFalse(list((root / "models").glob("*.tmp")))
 
     def test_rejects_duplicate_pairs_and_too_few_snapshots(self) -> None:
@@ -65,15 +71,39 @@ class LightRankerTrainingTest(unittest.TestCase):
             with self.assertRaisesRegex(DatasetValidationError, "duplicate snapshot/pair"):
                 load_datasets([inputs[0], inputs[0]])
 
+    def test_rejects_training_labels_that_overlap_validation_before_export(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = _write_snapshots(root / "data", snapshot_count=6, label_days=14)
+            with self.assertRaisesRegex(DatasetValidationError, "training label window"):
+                train_and_export(inputs, root / "models", "unsafe-model")
+            self.assertFalse((root / "models").exists())
 
-def _write_snapshots(directory: Path, snapshot_count: int) -> list[Path]:
+    def test_rejects_validation_labels_that_overlap_the_test_period(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            inputs = _write_snapshots(Path(directory), snapshot_count=6)
+            # With six snapshots, index 4 is validation and index 5 is test.
+            with inputs[4].open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            for row in rows:
+                snapshot = datetime.fromisoformat(row["feature_as_of"].replace("Z", "+00:00"))
+                row["label_window_end"] = _instant(snapshot + timedelta(days=14))
+            with inputs[4].open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
+            with self.assertRaisesRegex(DatasetValidationError, "validation label window"):
+                temporal_split(load_datasets(inputs))
+
+
+def _write_snapshots(directory: Path, snapshot_count: int, label_days: int = 7) -> list[Path]:
     directory.mkdir(parents=True, exist_ok=True)
     first_snapshot = datetime(2026, 1, 1, tzinfo=timezone.utc)
     outputs: list[Path] = []
     for snapshot_index in range(snapshot_count):
         feature_as_of = first_snapshot + timedelta(days=7 * snapshot_index)
         observation_start = feature_as_of - timedelta(days=30)
-        label_end = feature_as_of + timedelta(days=7)
+        label_end = feature_as_of + timedelta(days=label_days)
         path = directory / f"snapshot-{snapshot_index:02d}.csv"
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)

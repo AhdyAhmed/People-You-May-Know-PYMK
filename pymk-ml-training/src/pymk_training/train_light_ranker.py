@@ -107,7 +107,7 @@ def train_and_export(
         "rowCount": dataset.row_count,
         "positiveRate": float(np.mean(dataset.labels)),
         "inputs": list(dataset.input_files),
-        "split": _split_metadata(split),
+        "split": _split_metadata(split, dataset),
         "metrics": {
             "train": _metrics(pipeline, dataset, split.train),
             "validation": _metrics(pipeline, dataset, split.validation),
@@ -160,9 +160,12 @@ def _metrics(model: Pipeline, dataset: Dataset, indices: np.ndarray) -> dict[str
     }
 
 
-def _split_metadata(split: TemporalSplit) -> dict[str, object]:
+def _split_metadata(split: TemporalSplit, dataset: Dataset) -> dict[str, object]:
     return {
         "strategy": "chronological-feature-snapshot",
+        "labelWindowPolicy": "previous-partition-label-end<=next-partition-feature-start",
+        "trainLabelThroughInclusive": max(dataset.label_window_end[split.train].tolist()),
+        "validationLabelThroughInclusive": max(dataset.label_window_end[split.validation].tolist()),
         "train": _partition(split.train, split.train_snapshots),
         "validation": _partition(split.validation, split.validation_snapshots),
         "test": _partition(split.test, split.test_snapshots),

@@ -46,6 +46,7 @@ class Dataset:
     features: np.ndarray
     labels: np.ndarray
     feature_as_of: np.ndarray
+    label_window_end: np.ndarray
     member_ids: np.ndarray
     candidate_ids: np.ndarray
     input_files: tuple[dict[str, object], ...]
@@ -70,7 +71,7 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
     if not resolved:
         raise DatasetValidationError("at least one --input CSV is required")
 
-    parsed_rows: list[tuple[datetime, int, int, list[float], int]] = []
+    parsed_rows: list[tuple[datetime, int, int, list[float], int, datetime]] = []
     fingerprints: list[dict[str, object]] = []
     seen_keys: set[tuple[str, int, int]] = set()
     snapshot_windows: dict[str, tuple[str, str]] = {}
@@ -128,7 +129,7 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
                             "profile_view_count_last_30d")),
                     ]
                     parsed_rows.append(
-                        (feature_as_of, member_id, candidate_id, values, label))
+                        (feature_as_of, member_id, candidate_id, values, label, label_window_end))
                 except (DatasetValidationError, ValueError) as exception:
                     raise DatasetValidationError(
                         f"{path}:{line_number}: {exception}") from exception
@@ -144,6 +145,8 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
         labels=np.asarray([item[4] for item in parsed_rows], dtype=np.int64),
         feature_as_of=np.asarray(
             [_canonical_instant(item[0]) for item in parsed_rows], dtype=str),
+        label_window_end=np.asarray(
+            [_canonical_instant(item[5]) for item in parsed_rows], dtype=str),
         member_ids=np.asarray([item[1] for item in parsed_rows], dtype=np.int64),
         candidate_ids=np.asarray([item[2] for item in parsed_rows], dtype=np.int64),
         input_files=tuple(fingerprints),
@@ -173,6 +176,19 @@ def temporal_split(
     train_snapshots = snapshots[:train_count]
     validation_snapshots = snapshots[train_count:train_count + validation_count]
     test_snapshots = snapshots[train_count + validation_count:]
+    # A chronological feature split is insufficient if earlier labels include
+    # outcomes that were still unknown at the next partition's first snapshot.
+    for name, earlier_snapshots, next_start in (
+        ("training", train_snapshots, validation_snapshots[0]),
+        ("validation", validation_snapshots, test_snapshots[0]),
+    ):
+        mask = np.isin(dataset.feature_as_of, earlier_snapshots)
+        label_end = max(dataset.label_window_end[mask].tolist())
+        if label_end > next_start:
+            raise DatasetValidationError(
+                f"{name} label window ends at {label_end}, after the next partition "
+                f"starts at {next_start}; use snapshots spaced beyond the label "
+                "horizon or adjust split ratios to create non-overlapping windows")
     return TemporalSplit(
         train=np.flatnonzero(np.isin(dataset.feature_as_of, train_snapshots)),
         validation=np.flatnonzero(np.isin(dataset.feature_as_of, validation_snapshots)),

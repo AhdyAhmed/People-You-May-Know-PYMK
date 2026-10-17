@@ -18,12 +18,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
 
 /** An M1 smoke journey through the public API and the real migrated database. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
+@MockitoBean(types = LightRankerModel.class)
 @Transactional
 class ApiEndToEndTest {
 
@@ -45,7 +48,7 @@ class ApiEndToEndTest {
                 .andExpect(jsonPath("$.service").value("pymk-api"))
                 .andExpect(jsonPath("$.status").value("up"))
                 .andExpect(jsonPath("$.milestone")
-                        .value("M3 - Day 20: L1 serving complete"));
+                        .value("M3 - Day 21: L0 to L1 pipeline live"));
 
         mvc.perform(get("/api/v1/members/{id}", MEMBER_ID))
                 .andExpect(status().isOk())

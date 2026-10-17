@@ -13,7 +13,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M3 - Day 20: L1 serving complete"
+                "milestone", "M3 - Day 21: L0 to L1 pipeline live"
         );
     }
 }

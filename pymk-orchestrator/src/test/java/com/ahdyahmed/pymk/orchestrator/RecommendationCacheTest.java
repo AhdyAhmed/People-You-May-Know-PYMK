@@ -2,6 +2,7 @@ package com.ahdyahmed.pymk.orchestrator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -51,6 +52,56 @@ class RecommendationCacheTest {
         assertThat(cache.getResult(42)).isEmpty();
 
         verify(redis).delete(cache.resultKey(42));
+    }
+
+    @Test
+    void nullAndWrongOwnerPayloadsAreEvictedInsteadOfServed() {
+        for (String payload : List.of("null", "{\"memberId\":99,\"recommendations\":[]}")) {
+            when(values.get(anyString())).thenReturn(payload);
+            assertThat(cache.getResult(42)).isEmpty();
+        }
+        when(values.get(anyString())).thenReturn("null");
+        assertThat(cache.getCandidates(42)).isEmpty();
+        verify(redis, org.mockito.Mockito.times(2)).delete(cache.resultKey(42));
+        verify(redis).delete(cache.candidateKey(42));
+    }
+
+    @Test
+    void unsafeOrUnorderedResultsAreTreatedAsMisses() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        for (List<Recommendation> recommendations : List.of(
+                List.of(new Recommendation(42, 0.8, 0, List.of())),
+                List.of(new Recommendation(10, 0.8, 0, List.of()), new Recommendation(10, 0.7, 0, List.of())),
+                List.of(new Recommendation(10, 0.3, 0, List.of()), new Recommendation(20, 0.8, 0, List.of())))) {
+            when(values.get(anyString())).thenReturn(mapper.writeValueAsString(
+                    new RecommendationResult(42, recommendations)));
+            assertThat(cache.getResult(42)).isEmpty();
+        }
+    }
+
+    @Test
+    void cacheNamespaceMustMatchLoadedModelUnlessCacheIsDisabled() {
+        assertThatCode(() -> cache.verifyModelVersion("light-logreg-v1")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> cache.verifyModelVersion("other-model"))
+                .isInstanceOf(com.ahdyahmed.pymk.lightranker.LightRankerException.class);
+        RecommendationCacheProperties properties = new RecommendationCacheProperties();
+        properties.setEnabled(false);
+        cache = new RecommendationCache(redis, new ObjectMapper(), properties);
+        assertThatCode(() -> cache.verifyModelVersion("other-model")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void selfAndDuplicateCachedCandidatesAreEvicted() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var candidate = new com.ahdyahmed.pymk.candidategen.MergedCandidate(42, 0.5,
+                List.of(new com.ahdyahmed.pymk.candidategen.CandidateHit(42,
+                        com.ahdyahmed.pymk.candidategen.CandidateSourceType.HEURISTIC, 0.5, java.util.Map.of())));
+        when(values.get(anyString())).thenReturn(mapper.writeValueAsString(List.of(candidate)));
+        assertThat(cache.getCandidates(42)).isEmpty();
+        when(values.get(anyString())).thenReturn(mapper.writeValueAsString(List.of(candidate, candidate)));
+        assertThat(cache.getCandidates(99)).isEmpty();
+        verify(redis).delete(cache.candidateKey(42));
+        verify(redis).delete(cache.candidateKey(99));
     }
 
     @Test

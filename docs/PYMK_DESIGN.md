@@ -48,11 +48,26 @@ status differ.
 | Leakage-safe labeled training-data export | Implemented on Day 18 |
 | Chronological L1 logistic-regression training and ONNX export | Implemented on Day 19 |
 | Batched, contract-validated ONNX L1 serving | Implemented on Day 20 |
-| Orchestrator L1 integration, heavy ranker, and re-ranker | Planned for Days 21+ |
+| Public L0 → L1 orchestration and model-versioned caching | Implemented on Day 21 |
+| Heavy ranker and re-ranker | Planned for Days 22+ |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 20 complete**. Target-only sections below use
+The current checkpoint is **Day 21 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
+
+### 1.2 Delivery and acceptance rules
+
+The runnable checkpoint is the public L0 → L1 pipeline. Days 22–30 extend it;
+Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
+without a promised calendar duration. Each milestone must leave a reproducible
+demo, checked artifact contracts, automated failure cases, and a rollback path.
+The 150 ms p99 figure is a target, measured separately for cache hits and misses
+at a stated dataset size, concurrency, hardware, and request mix; it is not a
+current performance guarantee. Start with the documented 50K–100K synthetic
+dataset and increase scale only after measurement.
+
+Planned acceptance criteria below apply when their owning day is implemented.
+They do not mark future modules or operational guarantees as already delivered.
 
 ---
 
@@ -128,8 +143,7 @@ a separate microservice.
 | Async / messaging (planned M6) | Apache Kafka + Spring Kafka | Durable member/connection events, streaming feature projections, and cache invalidation |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
 | Vector similarity | pgvector extension on Postgres | Embedding-based retrieval (EBR) candidate source |
-| ML training | Python (scikit-learn/XGBoost) exported to **ONNX** or **PMML**, served from Java via ONNX Runtime / JPMML-Evaluator | Keeps training in the best ecosystem for it, keeps serving in Java |
-| ML alternative (pure Java) | Tribuo (Oracle's Java ML library) or Smile | For a "100% Java" version if avoiding Python entirely is a hard requirement |
+| ML training / serving | Python scikit-learn for L1; a small PyTorch network planned for L2; ONNX served by ONNX Runtime Java | Existing L1 path is authoritative; alternative frameworks require a separate design decision |
 | API | Spring Web (REST), OpenAPI/Swagger | `pymk-api` module |
 | Testing | JUnit5, Testcontainers (Postgres/Redis), Mockito | |
 | Build | Maven multi-module | One parent reactor, Java 21 toolchain |
@@ -195,7 +209,7 @@ public class Connection {
     private Long memberId;
     private Long connectedMemberId;
     private Instant connectedAt;
-    // undirected edge, stored as two rows (memberId<->connectedMemberId) for O(1) adjacency lookups
+    // undirected edge, stored as two directed rows for indexed adjacency lookups
 }
 
 @Entity
@@ -237,7 +251,7 @@ public class PymkPairFeature {
 ```
 
 ### 5.2 Schema notes
-- `connections` is denormalized as a symmetric edge list — trades storage for O(1) adjacency queries, matching how LinkedIn's graph-based candidate generation needs fast n-hop lookups.
+- `connections` is denormalized as a symmetric edge list with indexed adjacency lookup. Returning neighbors still scales with member degree; an index does not make a full adjacency read constant-time.
 - `member_embeddings` uses **pgvector** so L0's embedding-based retrieval (EBR) source can do an ANN (`<=>` cosine distance) query directly in Postgres without a separate vector DB for portfolio scale. Documented upgrade path: Qdrant/Milvus for production scale.
 - `pymk_features` is the **feature store** table: precomputed member-candidate pair features refreshed by the nightly Spring Batch ETL job, read by L1/L2 rankers at serving time (avoids expensive joins in the hot path).
 
@@ -295,7 +309,7 @@ hit and orders the union with reciprocal-rank fusion rather than comparing
 uncalibrated source scores. A source failure cancels the remaining fan-out and
 fails the generation request; partial candidate sets are not silently served.
 
-### Day 11 baseline orchestration
+### Day 11 baseline orchestration (superseded on Day 21)
 
 `RecommendationOrchestrator` is the first end-to-end serving implementation.
 It checks that the requester exists, generates the complete L0 union, fetches
@@ -303,8 +317,8 @@ mutual-connection counts for all candidates in one query, and orders by mutual
 count descending. Day 10's fusion score and candidate ID provide deterministic
 tie-breakers. The public limit defaults to 20 and is capped at 100. Candidate
 source failures become retryable `503` Problem Details instead of an empty or
-partially generated list. This mutual-count value is the temporary public
-`score`; L1 replaces it with a calibrated score later in the roadmap.
+partially generated list. This mutual-count value was the temporary public
+`score`; Day 21 replaced it with the L1 positive-class probability.
 
 ### Stage L1 — Light Ranker
 **Goal:** narrow a few thousand candidates to a few hundred. Calibrate scores across the heterogeneous L0 sources so they're comparable. Evaluated by **Recall@k** at k≈500.
@@ -312,7 +326,10 @@ partially generated list. This mutual-count value is the temporary public
 - **Implemented on Day 19:** a class-balanced logistic regression consumes the Day 18 feature/label contract after standard scaling. Whole `feature_as_of` snapshots are assigned chronologically to train, validation, and test partitions; random row splitting is prohibited.
 - The trainer exports an ONNX opset-17 graph and metadata with the exact six-feature order, scaler values, coefficients, split boundaries, input/model hashes, metrics, and runtime versions. It executes the exported graph and compares probabilities with scikit-learn before publishing artifacts atomically.
 - **Implemented on Day 20:** `pymk-light-ranker` loads the versioned artifact once with ONNX Runtime Java and validates its SHA-256 plus metadata, feature order, input shape/type, and two-class probability output before accepting traffic. It batch-fetches all directional feature rows and scores the full request in one inference call.
-- `L1LightRanker` fails closed if a candidate is missing features, a batch mixes snapshots, or inference violates the output contract. It preserves L0 provenance and returns at most 500 candidates (configurable), ordered by positive-class probability with fusion score and candidate ID as deterministic tie-breakers. Day 21 composes this stage into the public orchestrator; through Day 20, the API still serves the documented naive ordering.
+- `L1LightRanker` fails closed if a candidate is missing features, a batch mixes snapshots, or inference violates the output contract. It preserves L0 provenance and returns at most 500 candidates (configurable), ordered by positive-class probability with fusion score and candidate ID as deterministic tie-breakers.
+- **Implemented on Day 21:** the public orchestrator composes cached L0 → L1 and publishes the positive-class probability as `score`. Mutual counts flow from the same feature rows into explanations, avoiding a second ranking query. L1 or feature-store failures on cache misses return the existing retryable `503` contract without caching a failed or partial response. Redis keys use explicit L0/L1 pipeline and model versions.
+- **Day 21 hardening:** before reading either cache layer, the orchestrator checks that the configured cache model version matches the loaded model; mismatches return the same `503` contract. Invalid probabilities from any model implementation also use that serving contract. A full HTTP integration test exercises an actual exported ONNX model with PostgreSQL and Redis.
+- Public scores are positive-class outputs from a class-weighted classifier, not measured acceptance rates. Calibration remains an explicit Day 27 evaluation task; `[0,1]` bounds alone do not establish calibration.
 
 ### Stage L2 — Heavy Ranker
 **Goal:** precisely rank the few hundred remaining candidates. Evaluated by **AUC / Precision@k / ECE** (calibration matters because these scores feed the re-ranker).
@@ -321,14 +338,51 @@ partially generated list. This mutual-count value is the temporary public
 - Predicts multiple engagement events per candidate pair: `P(invite_sent)`, `P(invite_accepted)`.
 - Batches all candidates for one member into a single ONNX inference call for efficiency.
 
+The Day 24 export will define both labels as directional outcomes within the
+same mature `(featureAsOf, labelWindowEnd]` window. `invite_sent` is an outgoing
+invitation and `invite_accepted` is the existing acceptance outcome. Both heads
+predict unconditional window outcomes, not acceptance conditional on sending.
+An acceptance may concern an invitation sent before the snapshot, so the two
+same-window labels do not automatically imply `accepted <= sent`. Keep the
+Day 18 single-label export compatible; introduce an explicit v2 schema rather
+than silently changing the L1 trainer's input columns.
+
+The serving artifact will declare ordered features, their schema and embedding
+versions, named outputs, target definitions, tensor dimensions, and a checksum.
+Scale transforms are fitted only on training data and exported with the model.
+Before Day 28 cutover, Java/Python parity tests must cover actual batched
+inference, both output heads, empty input, missing features, invalid probabilities,
+and incompatible artifacts. Preserve the deployed L1 path as a configurable
+rollback option and give L2 a separate pipeline/cache namespace. The selected
+path must return a complete result or the established `503` contract.
+
 ### Stage Re-Ranker
 **Goal:** final blending + exposure-diversity constraints, producing the top-N (e.g. 20) shown to the user.
 
 - Combines L2's multiple predicted probabilities via a weighted linear blend: `score = w1*P(sent) + w2*P(accepted) + ...`
-- Weights `w1, w2...` are tuned offline via **Bayesian optimization** (e.g. a small Python job using `scikit-optimize`, replayed against a held-out logged dataset), then loaded as configuration into `pymk-reranker`.
+- Weights `w1, w2...` are tuned offline via **Bayesian optimization** (e.g. a small Python job using `scikit-optimize` on the validation cohort), then loaded as configuration into `pymk-reranker`.
 - **Exposure-diversity pass:** cap the proportion of results from any single dominant cluster (e.g. no more than 40% from the same employer) using a deterministic constrained re-sort. This improves result diversity but is not, by itself, a protected-attribute fairness guarantee; any fairness claim requires explicit groups, metrics, and evaluation.
 
-### Orchestration flow
+Day 29 will require nonnegative, finite blend weights normalized to sum to one,
+keeping the blended score in `[0,1]`. Diversity changes display order, so the
+Day 21 non-increasing-score invariant must be replaced with the documented
+diversity-order contract at that cutover, with a new pipeline version.
+
+Cache the reusable scored candidate pool before diversity selection, then apply
+the cap for each requested limit. A cap of fraction `r` for requested size `n`
+allows `max(1, floor(r*n))` members per known employer/cluster. Missing employer
+values do not form one artificial dominant employer. Select greedily in stable
+score order, skip candidates exceeding a cap, and return fewer results when
+the pool cannot satisfy the constraints; never duplicate candidates or relax
+caps silently. Limits 1, 2, 20, and 100 require explicit acceptance tests.
+
+Day 30 tunes weights on validation data only; the untouched test partition is
+used once for the final comparison. With synthetic data and no impression/
+propensity logs, the objective is a declared offline ranking proxy, not an
+estimate of causal engagement lift. Record the objective, seed, search budget,
+selected weights, and baseline comparison so the experiment can be reproduced.
+
+### Target orchestration flow (L2 and re-ranking planned)
 
 ```mermaid
 sequenceDiagram
@@ -350,11 +404,11 @@ sequenceDiagram
         L1-->>Orch: top 500
         Orch->>L2: score(42, top500)
         L2-->>Orch: scored 500
-        Orch->>RR: blend+diversify(scored)
-        RR-->>Orch: top 100
-        Orch->>Redis: cache top 100 (configured TTL)
+        Orch->>Redis: cache scored pool (configured TTL)
     end
-    Orch-->>API: requested slice (default 20)
+    Orch->>RR: blend+diversify(pool, requested limit)
+    RR-->>Orch: constrained top N
+    Orch-->>API: requested results (default 20)
     API-->>Client: JSON list
 ```
 
@@ -365,10 +419,16 @@ sequenceDiagram
 - Successful connection mutations invalidate both layers after commit for both endpoints and their two-hop neighborhoods; this covers requesters whose at-most-three-hop candidate paths can change. TTL remains a consistency backstop.
 - Cache reads, writes, corrupt payloads, and invalidation failures degrade to the underlying pipeline instead of failing recommendation requests.
 - Cached payloads are JSON representations of immutable candidate/recommendation contracts, never JPA entities.
+- Null JSON, wrong-member responses, self/duplicate candidates, oversized final lists, and non-descending final scores are evicted as cache misses. This structural validation does not replace graph eligibility checks or mutation invalidation.
+- New model releases must use a new artifact version and update `pymk.cache.model-version` to the exact metadata version. Versions are immutable release identifiers; replacing model bytes under the same version can reuse stale cache results.
+- Final results and L0 candidates can remain stale within their TTL after feature refreshes. A graph mutation may introduce candidates whose features have not yet been materialized; those requests return `503` until a successful refresh covers the complete live candidate batch. This is the current Day 21 availability boundary.
 
 ---
 
 ## 7. Offline Pipeline (Spring Batch)
+
+Frequencies below are intended operational schedules. Through Day 21 the
+implemented jobs are launched explicitly; automatic scheduling belongs to M7.
 
 | Job | Frequency | Purpose |
 |---|---|---|
@@ -391,8 +451,12 @@ global cap.
 The preflight step rejects a snapshot older than the newest materialized one.
 The computation step uses conditional PostgreSQL upserts that cannot overwrite
 a newer pair row, and the final step deletes rows older than the completed
-snapshot. A failed computation therefore leaves the previous good snapshot
-available. Spring Batch execution and restart state lives in Flyway V4 metadata
+snapshot. Chunk commits update the live pair table in place, so a running or
+failed refresh can leave a mixture of old and new rows; it does not atomically
+preserve a complete previous snapshot. L1 refuses a mixed request batch. Restart
+the failed job with the same identifying parameters to complete the refresh;
+availability of affected uncached requests resumes when their features are
+complete and consistent. Spring Batch execution and restart state lives in Flyway V4 metadata
 tables. Reusing all identifying parameters
 restarts a failed instance or refuses an already-completed instance; an explicit
 `run.id` creates an intentional rerun. Chunk size, cursor fetch size, per-source
@@ -418,7 +482,33 @@ therefore cannot publish a partial dataset or destroy the last good artifact.
 Chunk size, fetch size, and observation duration are configurable under
 `pymk.batch.training-export`.
 
-### 7.1 Kafka event pipeline (planned M6)
+### 7.1 Embedding and feature lifecycle (planned Days 22–23 and M7)
+
+Cosine similarity already exists in the six-feature Day 16 schema. Day 22
+replaces placeholder vectors with reproducible profile-text embeddings; it
+does not add a duplicate cosine column. Use a frozen text transform plus SVD,
+normalize finite nonzero vectors, and preserve the current 128-dimensional
+storage contract. Define deterministic neutral behavior for blank profiles and
+insufficient fitting data. Persist transform/version/fit-cutoff metadata and
+never use future profile or graph data to build historical vectors.
+
+Day 23 will stage a complete embedding generation before activating it. Validate
+member coverage, dimensions, checksums, and nearest-neighbor ordering, then
+promote the generation and rematerialize matching pair features. Old generations
+remain available for rollback. Model, embedding, feature, and cache versions
+must describe one compatible serving release; do not overwrite a live vector
+generation chunk by chunk while serving a model that assumes the old one.
+
+The current pair table retains one row per pair, not a history of snapshots.
+Until M7 introduces versioned feature generations and atomic activation,
+export each mature training snapshot before a later materialization removes
+it. Archive CSVs with hashes; the trainer can combine these archived exports.
+Serialize refresh/export operations so exports cannot read a partial refresh.
+M7 will stage and validate a full feature generation, activate it atomically,
+invalidate affected result caches, and retain the previous generation for
+rollback. A failed staged refresh must leave the active generation untouched.
+
+### 7.2 Kafka event pipeline (planned M6)
 
 Kafka complements the offline jobs; it does not replace PostgreSQL or the
 nightly, reproducible feature snapshot. PostgreSQL remains the source of truth,
@@ -462,6 +552,33 @@ downtime cannot permanently drift the feature store. Metrics cover outbox lag,
 consumer lag, publish/consume rates, retries, dead-letter counts, processing
 latency, and projection freshness.
 
+The outbox relay will claim bounded batches with recoverable ownership/leases,
+preserve order for each aggregate key, and retry a publish whose acknowledgement
+was lost using the same `eventId`. Acknowledgement and marking the row published
+are separate actions; a crash between them can duplicate delivery. Kafka
+transactions do not make the PostgreSQL side effect atomic with an offset
+commit, so the consumer's idempotency record and projection update belong in
+one database transaction. Scope idempotency by `(consumerName, eventId)` so each
+independent consumer can process the same event once. See the
+[Kafka delivery-semantics design](https://kafka.apache.org/40/design/design/).
+
+Use separate consumer groups for independent projections. A per-key retry
+policy must explicitly state whether it blocks the partition; retry/DLT routing
+must not be advertised as preserving strict order without tests. Recoveries
+and replay use the original event ID. A duplicate ID with different content
+is a conflict, not a new event. Retain idempotency data for at least the replay
+window and keep dead-letter access/retention limited because payloads can
+contain member data.
+
+Recent-event counters must include every distinct event still in the window,
+including late arrivals; a newer timestamp alone must not cause an older
+profile view to be dropped. State replacement uses aggregate sequence/version
+checks, while event-time counters use deduplication, explicit window boundaries,
+late-event policy, and batch reconciliation. Streaming projections are separate
+from the historical training snapshot and cannot rewrite its leakage boundary.
+Broker outages leave valid active serving features usable while outbox backlog
+and freshness lag remain observable.
+
 ---
 
 ## 8. API Design
@@ -471,8 +588,8 @@ GET  /                                                   # smoke status (impleme
 GET  /actuator/health                                    # dependency-aware health (implemented)
 GET  /api/v1/members/{id}                                # implemented
 POST /api/v1/connections                                 # implemented graph mutation
-GET  /api/v1/pymk/{memberId}?limit=20
-GET  /api/v1/pymk/{memberId}/explain/{candidateId}   # returns feature breakdown, for demo/debugging
+GET  /api/v1/pymk/{memberId}?limit=20                      # implemented through L1 on Day 21
+GET  /api/v1/pymk/{memberId}/explain/{candidateId}   # planned extension: feature breakdown for demo/debugging
 POST /api/v1/events                                   # planned M6: durably accept an event and return 202
 ```
 
@@ -491,7 +608,7 @@ real PostgreSQL/pgvector and Redis containers. Across several synthetic member
 IDs and limits from 1 through 100 it asserts that results never include the
 requester, an existing connection, a duplicate, or a missing member, and never
 exceed the requested limit. It also locks in deterministic cached responses,
-mutual-count ordering, and human-readable reasons. The companion PowerShell
+model-score ordering, probabilities bounded to `[0,1]`, and human-readable reasons. The companion PowerShell
 smoke script applies the response-visible checks to selected IDs in a running
 seeded environment; database-backed automated tests remain the authority for
 the existing-connection invariant.
@@ -503,7 +620,7 @@ the existing-connection invariant.
   "recommendations": [
     {
       "candidateId": 981,
-      "score": 12.0,
+      "score": 0.87,
       "mutualConnectionCount": 12,
       "reasons": ["12 mutual connections", "Same company: Acme Corp"]
     }
@@ -528,6 +645,27 @@ features computed after an invite was accepted would leak the outcome and make
 reported lift meaningless. Synthetic results are labeled as offline replay
 metrics, not presented as a real online A/B test or production CTR lift.
 
+**Implemented Day 19 hardening at the Day 21 checkpoint:** chronological
+snapshot splitting also checks label maturity across partitions. All training
+label windows must end at or before the first validation feature snapshot;
+all validation windows must end at or before the first test feature snapshot.
+Overlapping exports are rejected before fitting or publishing artifacts.
+Choose snapshot spacing at least as long as the label horizon or curate an
+explicit gap. Do not randomly drop rows to make a split appear valid. The
+general reason for separating time-ordered training and evaluation is described
+in [scikit-learn's temporal split documentation](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html);
+the label-end guard here is this project's additional constraint.
+
+Future reports will use the same frozen candidate cohorts, snapshot boundaries,
+and mature outcome windows across the baseline, L1, L2, and blended variants.
+Report requester-grouped Recall@k/Precision@k and coverage separately from
+row-level AUC, average precision, log loss, and calibration. State the denominator
+when positives fall outside the L0 pool; in-pool recall is not full-population
+recall. Single-class cohorts produce an explicit unavailable metric, not a
+fabricated AUC. Include positive prevalence and uncertainty across requesters.
+Fit embeddings, transforms, model parameters, calibration, and blend weights
+using training/validation data only; no test outcome may affect selection.
+
 ---
 
 ## 10. Scalability Notes (documented, not all built for v1)
@@ -538,13 +676,22 @@ metrics, not presented as a real online A/B test or production CTR lift.
 - Feature store table can be swapped for a real feature store (Feast) without changing the ranker interfaces.
 - Kafka is not on the synchronous recommendation read path. Broker or consumer downtime can delay freshness but must not make `GET /api/v1/pymk/{memberId}` unavailable; the outbox and nightly reconciliation job provide recovery paths.
 
+### 10.1 Operational and release acceptance (planned M7–M9)
+
+- Bound source execution time, connection pools, candidate batches, and concurrent requests. Exercise timeout/cancellation and Redis/database/model outages; virtual threads are not a substitute for resource budgets.
+- Track stage latency, cache hit/miss/error rates, feature coverage/age, model and feature versions, request/503 counts, outbox lag, consumer lag, and retries/DLT counts. Avoid member IDs or other unbounded values as metric labels.
+- Separate liveness from serving readiness. Readiness checks the active model and feature generation; Kafka downtime reports freshness degradation without removing an otherwise usable read service.
+- Keep immutable model manifests and compatible prior releases. Promote only after parity, coverage, quality, and cold/warm latency checks; rollback restores matching artifact, feature/embedding generation, and cache namespace together.
+- Keep development credentials local. Any public deployment first requires authentication, authorization of member-scoped reads/writes, request limits, secret injection, restricted administrative/explain endpoints, and a tested retention/deletion policy across database, caches, training archives, and event logs.
+- M9 delivers one-command dependency startup, deterministic seed instructions, actual health/recommendation smoke checks, a pinned release manifest, and evidence for the advertised scale. Optional Kubernetes remains an extension after the local release works.
+
 ---
 
 ## 11. Suggested Build Order (Milestones)
 
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
-3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, and contract-validated batched Java serving are complete through Day 20; public orchestrator integration follows on Day 21.
+3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, contract-validated batched Java serving, and the public L0 → L1 cutover are **complete through Day 21**.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.

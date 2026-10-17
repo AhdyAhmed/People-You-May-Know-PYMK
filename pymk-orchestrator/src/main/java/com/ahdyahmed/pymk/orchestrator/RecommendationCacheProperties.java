@@ -16,8 +16,8 @@ public class RecommendationCacheProperties {
     private boolean enabled = true;
     private String keyPrefix = "pymk";
     private String schemaVersion = "v1";
-    private String pipelineVersion = "l0-rrf-v1";
-    private String modelVersion = "naive-mutual-v1";
+    private String pipelineVersion = "l0-l1-v1";
+    private String modelVersion = "light-logreg-v1";
     private Duration l0Ttl = Duration.ofMinutes(30);
     private Duration resultTtl = Duration.ofMinutes(15);
 

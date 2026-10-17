@@ -96,13 +96,29 @@ public class L1LightRanker {
             throw new LightRankerException("L1 model returned the wrong number of scores");
         }
 
+        String modelVersion = model.modelVersion();
+        if (modelVersion == null || modelVersion.isBlank()) {
+            throw new LightRankerException("L1 model returned a blank model version");
+        }
         List<LightRankedCandidate> ranked = new ArrayList<>(scores.length);
         for (int index = 0; index < scores.length; index++) {
+            if (!Float.isFinite(scores[index]) || scores[index] < 0.0f || scores[index] > 1.0f) {
+                throw new LightRankerException("L1 model returned an invalid positive-class probability");
+            }
             ranked.add(new LightRankedCandidate(
-                    candidates.get(index), scores[index], snapshot, model.modelVersion()));
+                    candidates.get(index),
+                    scores[index],
+                    featuresByCandidate.get(candidates.get(index).candidateId())
+                            .getMutualConnectionCount(),
+                    snapshot,
+                    modelVersion));
         }
         ranked.sort(RANK_ORDER);
         return List.copyOf(ranked.subList(0, Math.min(maxCandidates, ranked.size())));
+    }
+
+    public String modelVersion() {
+        return model.modelVersion();
     }
 
     private static float[] toVector(PymkPairFeature feature) {

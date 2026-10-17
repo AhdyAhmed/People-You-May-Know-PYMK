@@ -5,35 +5,35 @@ import com.ahdyahmed.pymk.candidategen.CandidateHit;
 import com.ahdyahmed.pymk.candidategen.CandidateSourceType;
 import com.ahdyahmed.pymk.candidategen.L0CandidateGenerator;
 import com.ahdyahmed.pymk.candidategen.MergedCandidate;
-import com.ahdyahmed.pymk.domain.repository.ConnectionRepository;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
-import java.util.Comparator;
+import com.ahdyahmed.pymk.lightranker.L1LightRanker;
+import com.ahdyahmed.pymk.lightranker.LightRankedCandidate;
+import com.ahdyahmed.pymk.lightranker.LightRankerException;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-/** Day 11 baseline orchestrator: L0 followed by mutual-connection ordering. */
+/** Online pipeline composition: cached L0 generation followed by the Day 20 L1 ranker. */
 @Service
 public class RecommendationOrchestrator {
 
     public static final int MAX_RESULTS = 100;
 
     private final L0CandidateGenerator candidateGenerator;
+    private final L1LightRanker lightRanker;
     private final MemberRepository members;
-    private final ConnectionRepository connections;
     private final RecommendationCache cache;
 
     public RecommendationOrchestrator(
             L0CandidateGenerator candidateGenerator,
+            L1LightRanker lightRanker,
             MemberRepository members,
-            ConnectionRepository connections,
             RecommendationCache cache) {
         this.candidateGenerator = candidateGenerator;
+        this.lightRanker = lightRanker;
         this.members = members;
-        this.connections = connections;
         this.cache = cache;
     }
 
@@ -50,6 +50,12 @@ public class RecommendationOrchestrator {
         }
         if (!members.existsById(memberId)) {
             return Optional.empty();
+        }
+
+        try {
+            cache.verifyModelVersion(lightRanker.modelVersion());
+        } catch (LightRankerException ex) {
+            throw new RecommendationGenerationException("L1 model and cache configuration disagree", ex);
         }
 
         Optional<RecommendationResult> cachedResult = cache.getResult(memberId);
@@ -77,24 +83,17 @@ public class RecommendationOrchestrator {
             return Optional.of(empty);
         }
 
-        List<Long> candidateIds = candidates.stream().map(MergedCandidate::candidateId).toList();
-        Map<Long, Long> mutualCounts = connections
-                .countMutualConnectionsForCandidates(memberId, candidateIds)
-                .stream()
-                .collect(Collectors.toUnmodifiableMap(
-                        ConnectionRepository.MutualConnectionCount::getCandidateId,
-                        ConnectionRepository.MutualConnectionCount::getMutualConnectionCount));
+        final List<LightRankedCandidate> ranked;
+        try {
+            ranked = lightRanker.rank(memberId, candidates);
+        } catch (LightRankerException | DataAccessException ex) {
+            throw new RecommendationGenerationException(
+                    "Unable to rank complete recommendations for member " + memberId, ex);
+        }
 
-        List<Recommendation> recommendations = candidates.stream()
-                .sorted(Comparator
-                        .comparingLong((MergedCandidate candidate) ->
-                                mutualCounts.getOrDefault(candidate.candidateId(), 0L))
-                        .reversed()
-                        .thenComparing(MergedCandidate::fusionScore, Comparator.reverseOrder())
-                        .thenComparingLong(MergedCandidate::candidateId))
+        List<Recommendation> recommendations = ranked.stream()
                 .limit(MAX_RESULTS)
-                .map(candidate -> toRecommendation(
-                        candidate, mutualCounts.getOrDefault(candidate.candidateId(), 0L)))
+                .map(RecommendationOrchestrator::toRecommendation)
                 .toList();
         RecommendationResult fullResult = new RecommendationResult(memberId, recommendations);
         cache.putResult(memberId, fullResult);
@@ -109,10 +108,12 @@ public class RecommendationOrchestrator {
                 result.memberId(), result.recommendations().subList(0, limit));
     }
 
-    private static Recommendation toRecommendation(MergedCandidate candidate, long mutualCount) {
+    private static Recommendation toRecommendation(LightRankedCandidate ranked) {
+        MergedCandidate candidate = ranked.candidate();
+        long mutualCount = ranked.mutualConnectionCount();
         return new Recommendation(
                 candidate.candidateId(),
-                mutualCount,
+                ranked.score(),
                 mutualCount,
                 reasons(candidate.sourceHits(), mutualCount));
     }

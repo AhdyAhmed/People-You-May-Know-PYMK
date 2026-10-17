@@ -20,6 +20,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
 
 /** Real-Redis coverage for misses, JSON round trips, versioned keys, and TTL expiry. */
 @SpringBootTest(classes = PymkApiApplication.class, properties = {
@@ -27,6 +29,7 @@ import org.springframework.data.redis.core.RedisCallback;
         "pymk.cache.result-ttl=250ms"
 })
 @Import(PostgresTestConfig.class)
+@MockitoBean(types = LightRankerModel.class)
 class RecommendationCacheIntegrationTest {
 
     private static final long MEMBER_ID = 920_001L;
@@ -50,16 +53,16 @@ class RecommendationCacheIntegrationTest {
 
         List<MergedCandidate> candidates = candidates();
         RecommendationResult result = new RecommendationResult(MEMBER_ID,
-                List.of(new Recommendation(920_002L, 3.0, 3, List.of("3 mutual connections"))));
+                List.of(new Recommendation(920_002L, 0.93, 3, List.of("3 mutual connections"))));
         cache.putCandidates(MEMBER_ID, candidates);
         cache.putResult(MEMBER_ID, result);
 
         assertThat(cache.getCandidates(MEMBER_ID)).contains(candidates);
         assertThat(cache.getResult(MEMBER_ID)).contains(result);
         assertThat(cache.candidateKey(MEMBER_ID))
-                .isEqualTo("pymk:schema:v1:pipeline:l0-rrf-v1:model:naive-mutual-v1:l0:920001");
+                .isEqualTo("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:l0:920001");
         assertThat(cache.resultKey(MEMBER_ID))
-                .isEqualTo("pymk:schema:v1:pipeline:l0-rrf-v1:model:naive-mutual-v1:result:920001");
+                .isEqualTo("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:result:920001");
         assertThat(redis.getExpire(cache.candidateKey(MEMBER_ID), TimeUnit.MILLISECONDS)).isPositive();
         assertThat(redis.getExpire(cache.resultKey(MEMBER_ID), TimeUnit.MILLISECONDS)).isPositive();
     }

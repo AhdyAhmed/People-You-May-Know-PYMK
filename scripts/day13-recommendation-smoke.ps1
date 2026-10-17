@@ -31,10 +31,21 @@ foreach ($id in $MemberId) {
         throw "Member $id received duplicate candidates."
     }
 
+    $previousScore = [double]::PositiveInfinity
+    foreach ($recommendation in $recommendations) {
+        $score = [double]$recommendation.score
+        if ($null -eq $recommendation.score -or [double]::IsNaN($score) -or
+            [double]::IsInfinity($score) -or $score -lt 0 -or $score -gt 1 -or
+            $score -gt $previousScore) {
+            throw "Member $id received invalid or out-of-order L1 probability scores."
+        }
+        $previousScore = $score
+    }
+
     Write-Host "Member ${id}: $($recommendations.Count) recommendations (visible invariants passed)"
     $recommendations |
         Select-Object candidateId, score, mutualConnectionCount, @{Name = "reasons"; Expression = { $_.reasons -join "; " }} |
         Format-Table -AutoSize
 }
 
-Write-Host "Day 13 smoke check passed for $($MemberId.Count) member(s)."
+Write-Host "Recommendation smoke check (Day 21 contract) passed for $($MemberId.Count) member(s)."

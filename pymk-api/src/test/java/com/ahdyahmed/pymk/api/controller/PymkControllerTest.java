@@ -5,13 +5,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 import com.ahdyahmed.pymk.api.support.PostgresTestConfig;
+import com.ahdyahmed.pymk.api.support.LightRankerTestSupport;
 import com.ahdyahmed.pymk.domain.entity.Member;
 import com.ahdyahmed.pymk.domain.repository.ConnectionRepository;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
 import com.ahdyahmed.pymk.orchestrator.RecommendationCache;
+import com.ahdyahmed.pymk.featurestore.PymkPairFeatureRepository;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
+import com.ahdyahmed.pymk.lightranker.LightRankerException;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -25,8 +31,9 @@ import org.springframework.http.MediaType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-/** Full Days 11–12 request path against PostgreSQL/pgvector and Redis. */
+/** Full request path through the Day 21 L0/L1 pipeline against PostgreSQL/pgvector and Redis. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
@@ -44,10 +51,13 @@ class PymkControllerTest {
     @Autowired ConnectionRepository connections;
     @Autowired ConnectionService connectionService;
     @Autowired RecommendationCache cache;
+    @Autowired PymkPairFeatureRepository features;
     @Autowired StringRedisTemplate redis;
+    @MockitoBean LightRankerModel lightRankerModel;
 
     @BeforeEach
     void clearCache() {
+        LightRankerTestSupport.configureModel(lightRankerModel);
         redis.execute((RedisCallback<Void>) connection -> {
             connection.serverCommands().flushDb();
             return null;
@@ -57,6 +67,7 @@ class PymkControllerTest {
     @AfterEach
     void cleanCommittedFixture() {
         clearCache();
+        features.deleteAll();
         connections.deleteAll();
         members.deleteAll();
     }
@@ -71,7 +82,7 @@ class PymkControllerTest {
                 .andExpect(jsonPath("$.memberId").value(MEMBER))
                 .andExpect(jsonPath("$.recommendations.length()").value(3))
                 .andExpect(jsonPath("$.recommendations[0].candidateId").value(TWO_MUTUALS))
-                .andExpect(jsonPath("$.recommendations[0].score").value(2.0))
+                .andExpect(jsonPath("$.recommendations[0].score").value(0.625))
                 .andExpect(jsonPath("$.recommendations[0].mutualConnectionCount").value(2))
                 .andExpect(jsonPath("$.recommendations[0].reasons[0]").value("2 mutual connections"))
                 .andExpect(jsonPath("$.recommendations[1].candidateId").value(ONE_MUTUAL))
@@ -134,20 +145,36 @@ class PymkControllerTest {
                 .andExpect(jsonPath("$.recommendations[?(@.candidateId == 810005)]").isEmpty());
     }
 
+    @Test
+    void l1ServingFailureIsExposedAsRetryableServiceUnavailable() throws Exception {
+        seedGraph();
+        when(lightRankerModel.score(any(float[][].class)))
+                .thenThrow(new LightRankerException("synthetic model failure"));
+
+        mvc.perform(get("/api/v1/pymk/{memberId}", MEMBER).queryParam("limit", "3"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Recommendation service unavailable"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Recommendations are temporarily unavailable; retrying is safe."));
+    }
+
     private void seedGraph() {
         Instant joinedAt = Instant.parse("2026-01-15T10:00:00Z");
-        members.saveAll(List.of(
+        List<Member> fixtureMembers = List.of(
                 member(MEMBER, "Requester", "Acme", joinedAt),
                 member(FRIEND_ONE, "Friend One", "Other", joinedAt),
                 member(FRIEND_TWO, "Friend Two", "Other", joinedAt),
                 member(TWO_MUTUALS, "Two Mutuals", "Other", joinedAt),
                 member(ONE_MUTUAL, "One Mutual", "Other", joinedAt),
-                member(PROFILE_MATCH, "Profile Match", "Acme", joinedAt)));
+                member(PROFILE_MATCH, "Profile Match", "Acme", joinedAt));
+        members.saveAll(fixtureMembers);
         connectionService.connect(MEMBER, FRIEND_ONE, joinedAt);
         connectionService.connect(MEMBER, FRIEND_TWO, joinedAt);
         connectionService.connect(FRIEND_ONE, TWO_MUTUALS, joinedAt);
         connectionService.connect(FRIEND_TWO, TWO_MUTUALS, joinedAt);
         connectionService.connect(FRIEND_ONE, ONE_MUTUAL, joinedAt);
+        LightRankerTestSupport.materializeAllPairs(fixtureMembers, connections, features);
     }
 
     private static Member member(long id, String name, String company, Instant createdAt) {

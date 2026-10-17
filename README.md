@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 20 of 30 complete.** The M1 foundation and M2 naive-v1
-> recommendation pipeline are live; M3 now has trained and Java-served L1.
+> 🚧 **Status: Day 21 of 30 complete.** The M1 foundation and M2 baseline are
+> complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,11 +29,10 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 20 checkpoint, the
+The diagram is the end-state funnel. At the current Day 21 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
-pipeline plus the naive orchestrator and Redis caching are implemented. L1 is
-implemented as a standalone serving stage; Day 21 wires it into the public
-pipeline. L2 and re-ranking are scheduled later in the roadmap.
+pipeline, Redis caching, and learned L1 scoring are implemented and wired into
+the public endpoint. L2 and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -62,7 +61,7 @@ flowchart LR
 Full architecture, data model, API design, and offline evaluation strategy:
 [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md).
 
-## Naive v1 pipeline is live
+## L0 → L1 pipeline is live
 
 The M2 application is runnable end to end. A recommendation request currently:
 
@@ -70,8 +69,8 @@ The M2 application is runnable end to end. A recommendation request currently:
    pgvector embedding candidate sources.
 2. Removes the requester, existing connections, duplicates, and deleted IDs.
 3. Merges source provenance with reciprocal-rank fusion.
-4. Enriches candidates in one bulk query and ranks by mutual connections,
-   fusion score, then candidate ID.
+4. Batch-loads materialized pair features and scores the union in one ONNX
+   inference call, ordered by connection probability.
 5. Caches the full L0 union and reusable top-100 result in Redis, then returns
    the requested 1–100 slice with human-readable reasons.
 
@@ -90,7 +89,7 @@ dataset size, while the schema and ordering contract are stable):
   "recommendations": [
     {
       "candidateId": 981,
-      "score": 12.0,
+      "score": 0.87,
       "mutualConnectionCount": 12,
       "reasons": [
         "12 mutual connections",
@@ -101,9 +100,9 @@ dataset size, while the schema and ordering contract are stable):
 }
 ```
 
-This is intentionally the **naive baseline**: `score` is currently the mutual
-connection count, and generated embeddings are deterministic placeholder
-vectors. The feature store and learned L1/L2 ranking stages begin in M3/M4.
+`score` is the L1 model's positive-class probability in `[0,1]`; the separate
+`mutualConnectionCount` remains available for explanations. Generated
+embeddings are still deterministic placeholders until the Day 22–23 work.
 Authentication and abuse controls remain out of scope for this local portfolio
 API, so it should not be exposed publicly as-is.
 
@@ -145,7 +144,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 20.
+`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 21.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -221,14 +220,17 @@ mvn -B install
 # 4. Seed a synthetic dataset (~100K members by default; see pymk-datagen/README.md)
 mvn -pl pymk-datagen spring-boot:run
 
-# 5. Run the API
+# 5. Produce the feature snapshot and model artifacts using the workflow below
+#    (the API intentionally fails fast if the configured model is absent/invalid)
+
+# 6. Run the API
 mvn -pl pymk-api spring-boot:run
 ```
 
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 20: L1 serving complete"}
+# {"service":"pymk-api","status":"up","milestone":"M3 - Day 21: L0 to L1 pipeline live"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -251,7 +253,9 @@ java -jar pymk-batch/target/pymk-batch.jar "featureAsOf=$snapshot" "run.id=$runI
 The job reads only snapshot-eligible members and bounded L0-style candidates,
 uses non-regressing upserts in configurable chunks, and removes older snapshots
 only after successful materialization. A failed run can be restarted with the
-same parameters without discarding the last completed snapshot; snapshots older
+same parameters. Chunk commits can leave mixed old/new feature rows until the
+refresh completes; affected uncached requests fail with retryable `503` rather
+than mixing snapshots. Snapshots older
 than the latest completed materialization are rejected.
 
 After the outcome window for that snapshot has fully elapsed, export the Day 18
@@ -278,7 +282,11 @@ are written successfully.
 
 Train the Day 19 L1 model after collecting at least three exports with distinct
 snapshots. Whole snapshots—not individual rows—are assigned chronologically to
-train, validation, and test partitions:
+train, validation, and test partitions. Label windows in each earlier partition
+must have ended by the next partition's
+first feature snapshot. Overlapping windows are rejected before training.
+The example below assumes label horizons no longer than seven days; use wider
+snapshot spacing for longer label windows.
 
 ```powershell
 cd pymk-ml-training
@@ -312,9 +320,9 @@ pymk:
 
 `L1LightRanker.rank` performs one feature-store query and one ONNX inference
 for the entire L0 batch, rejects missing or mixed-snapshot features, and
-preserves candidate provenance in its deterministic top-K result. This stage
-is intentionally not used by the public endpoint until the Day 21 orchestrator
-cutover, so the running API remains on the documented naive ordering today.
+preserves candidate provenance in its deterministic top-K result. Day 21 wires
+that result into the public endpoint; missing features or model failures return
+retryable `503` responses rather than partial recommendations.
 
 ## API (Day 6)
 
@@ -379,27 +387,41 @@ pymk:
       EMBEDDING: 1000
 ```
 
-## Recommendation endpoint (Day 11)
+## Recommendation endpoint (Days 11–21)
 
 `GET /api/v1/pymk/{memberId}?limit=20` serves the complete L0 pipeline through
 `pymk-orchestrator`. The limit defaults to 20 and must be between 1 and 100.
-The Day 11 baseline fetches mutual-connection counts for the whole candidate
-set in one database query, then orders by mutual count, reciprocal-rank fusion,
-and candidate ID. Until L1 arrives, `score` is the mutual-connection count.
+Day 21 passes the L0 union to the batched light ranker. Results are ordered by
+the learned positive-class probability, then L0 fusion score and candidate ID
+for deterministic ties. `score` is that probability; mutual count remains a
+separate response field and explanation signal.
+
+These class-weighted model outputs have not yet been validated as calibrated
+acceptance rates; calibration is part of Day 27's held-out evaluation.
 
 The milestone section above contains the public request and response example.
 
 Self, existing connections, missing members, and duplicate candidates remain
 excluded. Unknown requesters return `404`, invalid IDs or limits return `400`,
-and a candidate-source failure returns retryable `503` rather than partial data.
+and candidate, feature-store, or model serving failures return retryable `503`.
+New graph candidates may lack materialized features until the next successful
+batch refresh; the endpoint requires complete, consistent feature coverage.
 
 ## Redis caching (Day 12)
 
 The orchestrator caches both the full L0 candidate union and the final top-100
-baseline result. A request for any limit from 1 to 100 slices the same final
+L1-ranked result. A request for any limit from 1 to 100 slices the same final
 entry, avoiding one cache key per limit. Every key contains schema, pipeline,
 and model versions so a deployment can move to a new namespace without reading
 incompatible payloads.
+
+The configured `model-version` must match the loaded artifact's metadata before
+either cache layer can be read; a mismatch returns `503`. Publish new model
+bytes with a new version and update this configuration together. Null JSON,
+wrong-member responses, self/duplicate candidates, oversized final lists, and
+unordered final scores are evicted and recomputed. Feature refreshes do not
+currently invalidate these caches, so refreshed signals become visible after
+the configured TTL expires or an explicit eviction.
 
 Defaults can be overridden with Spring configuration:
 
@@ -409,8 +431,8 @@ pymk:
     enabled: true
     key-prefix: pymk
     schema-version: v1
-    pipeline-version: l0-rrf-v1
-    model-version: naive-mutual-v1
+    pipeline-version: l0-l1-v1
+    model-version: light-logreg-v1
     l0-ttl: 30m
     result-ttl: 15m
 ```
@@ -426,7 +448,7 @@ The automated end-to-end quality gate checks several synthetic requester IDs
 and limits from 1 to 100 against real PostgreSQL/pgvector and Redis containers.
 It rejects self-recommendations, existing connections, duplicates, missing
 members, over-limit responses, unstable cached ordering, and regressions in the
-mutual-heavy baseline or explanation reasons.
+L1 probability ordering or explanation reasons.
 
 For a running application seeded with your own data, inspect several IDs with:
 
@@ -537,6 +559,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       and tensor-contract checks, batched feature lookup/inference,
       deterministic configurable top-K ranking, fail-closed snapshot coverage,
       and real cross-language model execution tests.
+- [x] **Day 21 — Public L1 cutover**: L0 → L1 orchestration, probability scores,
+      feature-row explanation reuse, versioned cache namespace migration,
+      retryable ranker failures, before/after ordering checks, and full API
+      integration coverage with materialized features.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

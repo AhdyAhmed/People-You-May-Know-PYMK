@@ -11,11 +11,14 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import com.ahdyahmed.pymk.lightranker.LightRankerModel;
 
 /** Guards the OpenAPI wiring: spec is served and documents the real endpoints. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
+@MockitoBean(types = LightRankerModel.class)
 class OpenApiDocsTest {
 
     @Autowired MockMvc mvc;

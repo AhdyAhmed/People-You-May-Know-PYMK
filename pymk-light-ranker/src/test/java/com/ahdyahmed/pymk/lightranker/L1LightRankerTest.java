@@ -98,6 +98,20 @@ class L1LightRankerTest {
         verifyNoInteractions(repository, model);
     }
 
+    @Test
+    void invalidModelProbabilitiesFailWithTheServingExceptionContract() {
+        PymkPairFeatureRepository repository = mock(PymkPairFeatureRepository.class);
+        when(repository.findForCandidates(MEMBER, List.of(10L)))
+                .thenReturn(List.of(feature(10, 1, false, false, false, 0, 0, SNAPSHOT)));
+        for (float score : new float[] {Float.NaN, Float.POSITIVE_INFINITY, -0.1f, 1.1f}) {
+            assertThatThrownBy(() -> new L1LightRanker(repository,
+                    new CapturingModel(new float[] {score}), 500)
+                    .rank(MEMBER, List.of(candidate(10, 1))))
+                    .isInstanceOf(LightRankerException.class)
+                    .hasMessageContaining("invalid positive-class probability");
+        }
+    }
+
     private static MergedCandidate candidate(long candidateId, double fusionScore) {
         return new MergedCandidate(
                 candidateId,

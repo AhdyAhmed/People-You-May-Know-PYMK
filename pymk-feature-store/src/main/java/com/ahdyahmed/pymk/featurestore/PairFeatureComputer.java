@@ -59,8 +59,15 @@ public class PairFeatureComputer {
                 featureAsOf.minus(PROFILE_VIEW_WINDOW),
                 featureAsOf));
 
-        float[] memberEmbedding = embeddingAtSnapshot(pairId.getMemberId(), featureAsOf);
-        float[] candidateEmbedding = embeddingAtSnapshot(pairId.getCandidateId(), featureAsOf);
+        var memberVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getMemberId(), featureAsOf);
+        var candidateVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getCandidateId(), featureAsOf);
+        if (memberVector.isPresent() && candidateVector.isPresent()
+                && (!memberVector.get().getEmbeddingVersion().equals(candidateVector.get().getEmbeddingVersion())
+                    || !Objects.equals(memberVector.get().getFitCutoff(), candidateVector.get().getFitCutoff()))) {
+            throw new FeatureInputUnavailableException("Cannot compare different embedding transforms");
+        }
+        float[] memberEmbedding = memberVector.map(e -> e.getEmbedding()).orElse(null);
+        float[] candidateEmbedding = candidateVector.map(e -> e.getEmbedding()).orElse(null);
 
         return new PymkPairFeature(
                 pairId,
@@ -84,9 +91,4 @@ public class PairFeatureComputer {
         return member;
     }
 
-    private float[] embeddingAtSnapshot(long memberId, Instant featureAsOf) {
-        return embeddings.findByMemberIdAndUpdatedAtLessThanEqual(memberId, featureAsOf)
-                .map(embedding -> embedding.getEmbedding())
-                .orElse(null);
-    }
 }

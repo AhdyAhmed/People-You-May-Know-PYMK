@@ -49,15 +49,17 @@ status differ.
 | Chronological L1 logistic-regression training and ONNX export | Implemented on Day 19 |
 | Batched, contract-validated ONNX L1 serving | Implemented on Day 20 |
 | Public L0 → L1 orchestration and model-versioned caching | Implemented on Day 21 |
+| Frozen profile TF-IDF/SVD embeddings, staging export and vector provenance | Implemented on Day 22; coordinated activation planned Day 23 |
 | Heavy ranker and re-ranker | Planned for Days 22+ |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 21 complete**. Target-only sections below use
+The current checkpoint is **Day 22 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
-The runnable checkpoint is the public L0 → L1 pipeline. Days 22–30 extend it;
+The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
+embedding generation. Days 23–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -68,6 +70,26 @@ dataset and increase scale only after measurement.
 
 Planned acceptance criteria below apply when their owning day is implemented.
 They do not mark future modules or operational guarantees as already delivered.
+
+### 1.3 Delivery dependencies and release gates
+
+| Owner | Deliverable | Gate before it can affect serving |
+|---|---|---|
+| Days 19–22, implemented | Frozen L1 model and profile transform artifacts | Validate schema/checksums, reject an existing output version, verify actual inference and vector contracts |
+| Day 23 | Embedding generation plus compatible features and L1 release | Complete staged coverage, evaluate/retrain L1 on matching vectors, publish one coherent release and prove rollback |
+| Days 24–28 | Multi-target labels, L2 training/evaluation/serving | Same frozen evaluation cohort, Java/ONNX parity, explicit score semantics, selectable L1 rollback |
+| Days 29–30 | Blend and diversity policy | Valid weights, request-size-specific cap tests, validation-only tuning, untouched test report |
+| Days 31–35 | Kafka ingestion and projections | Durable database receipt, replay-safe effects, tested late events and recovery without changing historical snapshots |
+| M7–M9 | Scheduled operations, observability and packaged demo | Expand the Day 23 release mechanism, prove outage/load/restore behavior and reproduce the documented startup |
+
+An offline export is not an active serving release. Feature shape compatibility
+does not establish statistical compatibility: changing embeddings changes L0
+candidates and the cosine distribution seen by L1. Day 23 therefore includes
+the minimum coordinated feature/model release mechanism; M7 expands scheduling,
+reconciliation and operations rather than postponing that correctness requirement.
+Each future gate records its dataset, commands, artifact hashes and observed
+results. If a quality gate fails, retain the compatible previous release and
+record the failure; elapsed calendar days do not override acceptance criteria.
 
 ---
 
@@ -148,7 +170,7 @@ a separate microservice.
 | Testing | JUnit5, Testcontainers (Postgres/Redis), Mockito | |
 | Build | Maven multi-module | One parent reactor, Java 21 toolchain |
 | Deployment | Docker Compose (local), optional Kubernetes manifests | |
-| Observability | Micrometer + Prometheus + Grafana | Latency/throughput per stage |
+| Observability (planned M8) | Micrometer + Prometheus + Grafana | Per-stage latency/throughput dashboards; current actuator health is separate |
 
 ---
 
@@ -232,6 +254,8 @@ public class MemberEmbedding {
     @Column(columnDefinition = "vector(128)") // pgvector
     private float[] embedding;
     private Instant updatedAt;
+    private String embeddingVersion; // immutable transform label, V6
+    private Instant fitCutoff; // nullable only for legacy placeholder vectors
 }
 
 @Entity
@@ -253,7 +277,7 @@ public class PymkPairFeature {
 ### 5.2 Schema notes
 - `connections` is denormalized as a symmetric edge list with indexed adjacency lookup. Returning neighbors still scales with member degree; an index does not make a full adjacency read constant-time.
 - `member_embeddings` uses **pgvector** so L0's embedding-based retrieval (EBR) source can do an ANN (`<=>` cosine distance) query directly in Postgres without a separate vector DB for portfolio scale. Documented upgrade path: Qdrant/Milvus for production scale.
-- `pymk_features` is the **feature store** table: precomputed member-candidate pair features refreshed by the nightly Spring Batch ETL job, read by L1/L2 rankers at serving time (avoids expensive joins in the hot path).
+- `pymk_features` is the **feature store** table: precomputed member-candidate pair features refreshed by the manually launched Spring Batch job at this checkpoint, read by L1 at serving time. Nightly scheduling and L2 consumption are planned.
 
 ### 5.3 Data invariants
 
@@ -267,6 +291,14 @@ public class PymkPairFeature {
 - Day 16 feature computation counts mutual edges only when both directed edges existed by `feature_as_of`, and counts requester-to-candidate profile views in `(feature_as_of - 30 days, feature_as_of]`. Reverse views, the exclusive lower boundary, and later events are excluded.
 - Embeddings are used only when both `updated_at` values are no later than the snapshot; otherwise cosine similarity is the neutral value `0`. Zero vectors also map to `0`, while malformed/non-finite vectors fail fast.
 - Company, school, and geo flags require the same nonblank canonical value. The current synthetic model treats these member attributes as stable; historical profile-version storage is required before mutable production profiles can be backfilled without leakage.
+
+Historical guarantees through Day 22 assume the synthetic source rows are stable.
+`occurredAt` says when an event happened, not when the system learned about it.
+M6/M7 replay must also retain `ingestedAt`/source revisions and declare whether a
+dataset reconstructs knowledge available then or later corrected event history.
+Late events may repair live projections, but cannot silently revise an archived
+training dataset. Corrected datasets receive new identities and new evaluation
+results. Mutable profiles require versioned observations before historical reuse.
 
 ---
 
@@ -421,22 +453,29 @@ sequenceDiagram
 - Cached payloads are JSON representations of immutable candidate/recommendation contracts, never JPA entities.
 - Null JSON, wrong-member responses, self/duplicate candidates, oversized final lists, and non-descending final scores are evicted as cache misses. This structural validation does not replace graph eligibility checks or mutation invalidation.
 - New model releases must use a new artifact version and update `pymk.cache.model-version` to the exact metadata version. Versions are immutable release identifiers; replacing model bytes under the same version can reuse stale cache results.
+- The Python L1 publisher now refuses an existing model or metadata path and uses exclusive atomic publication of each completed file. Metadata is published after the ONNX file. They are not one filesystem transaction: an interrupted pair is inactive, reserves that version, and requires a new version for a fresh L1 training attempt. Java still validates both files and their checksum before loading.
 - Final results and L0 candidates can remain stale within their TTL after feature refreshes. A graph mutation may introduce candidates whose features have not yet been materialized; those requests return `503` until a successful refresh covers the complete live candidate batch. This is the current Day 21 availability boundary.
+
+Delete-on-mutation plus TTL is eventual consistency: an in-flight request can
+repopulate an old result after invalidation. M8 must exercise that race and use
+a graph/release revision or equivalent write fencing before claiming immediate
+cache coherence. Day 23 release cache keys must include the serving release ID,
+so an old request cannot populate the newly activated release's namespace.
 
 ---
 
 ## 7. Offline Pipeline (Spring Batch)
 
-Frequencies below are intended operational schedules. Through Day 21 the
+Frequencies below are intended operational schedules. Through Day 22 the
 implemented jobs are launched explicitly; automatic scheduling belongs to M7.
 
 | Job | Frequency | Purpose |
 |---|---|---|
 | `FeatureComputationJob` | nightly | **Implemented Day 17:** recompute `pymk_features` for bounded, snapshot-eligible member pairs |
 | `TrainingDatasetExportJob` | after a label window matures | **Implemented Day 18:** export snapshot features and future-window acceptance labels to deterministic CSV |
-| `EmbeddingRefreshJob` | weekly | Recompute member embeddings (e.g. node2vec-style over the connection graph, or a simple profile-text embedding) |
+| `EmbeddingRefreshJob` | weekly | Planned Day 23: stage Day 22 frozen profile TF-IDF/SVD vectors and activate a compatible serving release |
 | `GraphIndexRebuildJob` | daily | Materialize/refresh any denormalized adjacency structures used by L0 |
-| `ModelSyncJob` | on model release | Pull latest ONNX/PMML model artifact from the model registry (could just be a versioned S3/local path for a portfolio project) into `pymk-heavy-ranker` / `pymk-light-ranker` |
+| `ModelSyncJob` | on model release | Planned M7: fetch the exact ONNX artifact named by a validated release manifest; never follow an unversioned latest pointer independently of features |
 | `OfflineEvalJob` | weekly | Compute Recall@k / AUC / Precision@k against a held-out labeled set, log to a metrics table for a "model quality over time" dashboard |
 
 `FeatureComputationJob` requires an ISO-8601 `featureAsOf` job parameter and
@@ -482,15 +521,42 @@ therefore cannot publish a partial dataset or destroy the last good artifact.
 Chunk size, fetch size, and observation duration are configurable under
 `pymk.batch.training-export`.
 
-### 7.1 Embedding and feature lifecycle (planned Days 22–23 and M7)
+### 7.1 Embedding and feature lifecycle (Day 22 computation; Day 23/M7 activation planned)
 
-Cosine similarity already exists in the six-feature Day 16 schema. Day 22
-replaces placeholder vectors with reproducible profile-text embeddings; it
-does not add a duplicate cosine column. Use a frozen text transform plus SVD,
-normalize finite nonzero vectors, and preserve the current 128-dimensional
-storage contract. Define deterministic neutral behavior for blank profiles and
-insufficient fitting data. Persist transform/version/fit-cutoff metadata and
-never use future profile or graph data to build historical vectors.
+Cosine similarity remains in the unchanged six-feature Day 16 schema. The
+implemented Day 22 Python CLI fits TF-IDF on NFKC/casefold-normalized headline,
+company, school and geography (not member names/IDs), then seeded truncated SVD.
+It freezes vocabulary, IDF and components in a checksum-validated JSON artifact,
+normalizes nonzero outputs and zero-pads to 128 dimensions. Blank/tokenless or
+wholly unseen profiles yield neutral zero vectors. Constant TF-IDF corpora
+(including equivalent text with different word order/punctuation) and one-term
+corpora use a stable TF-IDF direction; other small corpora use bounded SVD dimensions. Fit profiles
+are ID-sorted for reproducibility. Reproducibility assumes recorded library
+versions; reload never refits. See [scikit-learn TruncatedSVD](https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.TruncatedSVD.html).
+
+Input CSVs require `created_at` and an explicit `profile_as_of` observation
+timestamp. A member created after the cutoff is excluded; a profile observed
+after it is rejected because the current member table cannot reconstruct a past
+profile. Use archived point-in-time profiles, not today's profile relabeled with
+an older timestamp. A transform fitted after a requested export cutoff is
+rejected. Immutable exports include version, fit cutoff and vector availability
+timestamp; the CLI stages files only and does not activate live data.
+
+The loader checks the complete transform metadata, timezone-aware cutoff,
+positive fit-member count, supported policies, vocabulary indices, exact matrix
+shape and finite numeric values in addition to the checksum. A valid checksum
+alone does not make a malformed contract usable. CSVs reject duplicate headers
+and ragged rows; direct fitting also rejects nonpositive member IDs. A requested
+version during transform must match the loaded artifact's version.
+
+V6 adds `embedding_version` and nullable legacy `fit_cutoff` to stored vectors.
+Non-placeholder vectors require a fit cutoff no later than availability.
+Stored-member retrieval filters mixed versions/fit cutoffs and zero vectors before
+limiting; zero-query vectors produce no embedding candidates. Raw-vector lookup
+without provenance is scoped to legacy placeholders; new transforms use the
+`MemberEmbedding` query overload carrying version and cutoff. Pair computation
+rejects mixed versions/cutoffs; zero/missing vectors retain neutral cosine. The zero-vector
+exclusion matches [pgvector's cosine-index contract](https://github.com/pgvector/pgvector#troubleshooting).
 
 Day 23 will stage a complete embedding generation before activating it. Validate
 member coverage, dimensions, checksums, and nearest-neighbor ordering, then
@@ -499,12 +565,30 @@ remain available for rollback. Model, embedding, feature, and cache versions
 must describe one compatible serving release; do not overwrite a live vector
 generation chunk by chunk while serving a model that assumes the old one.
 
+Day 23's release manifest binds `releaseId`, transform checksum/version/fit
+cutoff, embedding generation, feature schema/generation, model checksums/versions,
+pipeline version and source snapshot. Stage and validate all referenced objects
+before a short activation transaction changes a single active-release pointer.
+Readers pin that identity once per request, including cache access. Retain the
+prior objects until readers drain and the rollback retention window expires.
+A failed import, stale concurrent promoter, missing model, incomplete feature
+coverage or failed quality gate must leave the active pointer unchanged. A new
+generation cannot reuse an existing transform label with different bytes.
+
+Evaluate the current L1 artifact against the new candidate/feature distribution
+and retrain using the existing Day 19 workflow where needed, before activation.
+Use mature, archived training snapshots computed with that same frozen transform;
+never reinterpret old placeholder cosine values as profile-vector features.
+Validate vector-file hashes, member uniqueness/coverage and zero-vector counts.
+Blank vectors are valid coverage, but are intentionally absent from cosine ANN.
+The Day 17 in-place job alone is insufficient to satisfy this activation gate.
+
 The current pair table retains one row per pair, not a history of snapshots.
-Until M7 introduces versioned feature generations and atomic activation,
+Until Day 23 supplies coordinated staging and activation for embedding releases,
 export each mature training snapshot before a later materialization removes
 it. Archive CSVs with hashes; the trainer can combine these archived exports.
 Serialize refresh/export operations so exports cannot read a partial refresh.
-M7 will stage and validate a full feature generation, activate it atomically,
+M7 will extend that mechanism to every scheduled feature refresh, activate it atomically,
 invalidate affected result caches, and retain the previous generation for
 rollback. A failed staged refresh must leave the active generation untouched.
 
@@ -542,8 +626,10 @@ after their database transaction succeeds and use `eventId` as an idempotency
 key. Processing uses bounded retries with exponential backoff; exhausted records
 go to the matching dead-letter topic with the original metadata and failure
 reason. Partition keys preserve ordering for one subject, but no global event
-ordering is assumed. Consumers reject stale events when applying a projection
-whose recorded event time is newer.
+ordering is assumed. State-replacement projections reject obsolete aggregate
+sequence numbers. Additive counters deduplicate by identity and admit valid late
+events using their event-time window; arrival order or a newer timestamp alone
+does not justify dropping a distinct event.
 
 Streaming projections maintain recent counters such as profile views and issue
 targeted cache invalidations. Nightly `FeatureComputationJob` output remains the
@@ -569,6 +655,15 @@ and replay use the original event ID. A duplicate ID with different content
 is a conflict, not a new event. Retain idempotency data for at least the replay
 window and keep dead-letter access/retention limited because payloads can
 contain member data.
+
+Day 32 ingestion defines per-event required fields, valid member references,
+accepted clock skew and duplicate identity semantics: replaying identical content
+returns the original receipt, while conflicting content returns `409`. The outbox
+retains unpublished rows through broker outages; admission/backlog limits are
+explicit and cannot discard accepted events. Day 33 acknowledges a poison record
+only after its durable DLT publication succeeds. On DLT broker failure, retain the
+record for retry. Replay beyond the deduplication retention window requires a
+fresh projection rebuild or extended identity retention, not ordinary redelivery.
 
 Recent-event counters must include every distinct event still in the window,
 including late arrivals; a newer timestamp alone must not cause an older
@@ -664,7 +759,19 @@ when positives fall outside the L0 pool; in-pool recall is not full-population
 recall. Single-class cohorts produce an explicit unavailable metric, not a
 fabricated AUC. Include positive prevalence and uncertainty across requesters.
 Fit embeddings, transforms, model parameters, calibration, and blend weights
-using training/validation data only; no test outcome may affect selection.
+with separate ownership: vocabulary/IDF/SVD, feature scaling and model parameters
+use training data; calibration and model/blend selection use declared validation
+data. Reserve test for the final comparison. No test feature corpus or outcome
+may refit an upstream transform. Temporal folds each carry their own frozen
+transform and artifact provenance.
+
+Day 27/30 reports also stratify coverage and quality for blank profiles, new
+members, low/high degree, and graph-only versus embedding-sourced candidates.
+Record the candidate budget at each stage, positives lost before ranking, and
+bootstrap intervals by requester. Fix the cohort, budget and metric definitions
+before comparisons. Diversity caps are counts relative to requested size; an
+underfilled page may have a higher actual group fraction, so report both returned
+size and realized exposure instead of claiming an unconditional percentage cap.
 
 ---
 
@@ -684,6 +791,8 @@ using training/validation data only; no test outcome may affect selection.
 - Keep immutable model manifests and compatible prior releases. Promote only after parity, coverage, quality, and cold/warm latency checks; rollback restores matching artifact, feature/embedding generation, and cache namespace together.
 - Keep development credentials local. Any public deployment first requires authentication, authorization of member-scoped reads/writes, request limits, secret injection, restricted administrative/explain endpoints, and a tested retention/deletion policy across database, caches, training archives, and event logs.
 - M9 delivers one-command dependency startup, deterministic seed instructions, actual health/recommendation smoke checks, a pinned release manifest, and evidence for the advertised scale. Optional Kubernetes remains an extension after the local release works.
+- M8 records timeout budgets and resource saturation alongside latency, exercises cache fill/invalidation races, and compares exact versus approximate vector retrieval on a fixed sample with query plans. Having an HNSW index does not prove every query uses it or achieves a particular recall/latency.
+- M7/M9 exercise database backup/restore, migration from the preceding checkpoint, release-pointer rollback and artifact availability after restart. Define retention for inactive generations and incomplete staging files; garbage collection never removes an active or rollback-referenced artifact.
 
 ---
 

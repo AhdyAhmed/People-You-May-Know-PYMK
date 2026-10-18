@@ -22,9 +22,9 @@ import org.hibernate.type.SqlTypes;
  * relationships (see {@link Connection}, {@link MemberEvent}).</p>
  *
  * <p>Populated with random placeholder vectors by the synthetic data
- * generator (Day 4/5, {@code pymk-datagen}); real embeddings (node2vec over
- * the connection graph, or profile-text embeddings) replace them in Week 4
- * via {@code EmbeddingRefreshJob}.</p>
+ * generator (Day 4/5, {@code pymk-datagen}). Day 22 implements frozen profile
+ * TF-IDF/SVD generation and version/fit-cutoff provenance; Day 23 owns the
+ * coordinated live replacement via {@code EmbeddingRefreshJob}.</p>
  */
 @Entity
 @Table(name = "member_embeddings")
@@ -45,18 +45,43 @@ public class MemberEmbedding {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "embedding_version", nullable = false, length = 100)
+    private String embeddingVersion;
+
+    @Column(name = "fit_cutoff")
+    private Instant fitCutoff;
+
     protected MemberEmbedding() {
         // required by JPA
     }
 
     public MemberEmbedding(Long memberId, float[] embedding, Instant updatedAt) {
-        if (embedding.length != DIMENSIONS) {
+        this(memberId, embedding, updatedAt, "placeholder-v1", null);
+    }
+
+    public MemberEmbedding(Long memberId, float[] embedding, Instant updatedAt,
+                           String embeddingVersion, Instant fitCutoff) {
+        if (embedding == null || embedding.length != DIMENSIONS) {
             throw new IllegalArgumentException(
-                    "Embedding must have %d dimensions, got %d".formatted(DIMENSIONS, embedding.length));
+                    "Embedding must have %d dimensions".formatted(DIMENSIONS));
+        }
+        for (float value : embedding) {
+            if (!Float.isFinite(value)) {
+                throw new IllegalArgumentException("Embedding values must be finite");
+            }
+        }
+        if (memberId == null || memberId <= 0 || updatedAt == null
+                || embeddingVersion == null || embeddingVersion.isBlank()
+                || embeddingVersion.length() > 100
+                || (fitCutoff != null && fitCutoff.isAfter(updatedAt))
+                || (!"placeholder-v1".equals(embeddingVersion) && fitCutoff == null)) {
+            throw new IllegalArgumentException("Invalid embedding identity or provenance");
         }
         this.memberId = memberId;
-        this.embedding = embedding;
+        this.embedding = embedding.clone();
         this.updatedAt = updatedAt;
+        this.embeddingVersion = embeddingVersion;
+        this.fitCutoff = fitCutoff;
     }
 
     public Long getMemberId() {
@@ -64,8 +89,12 @@ public class MemberEmbedding {
     }
 
     public float[] getEmbedding() {
-        return embedding;
+        return embedding.clone();
     }
+
+    public String getEmbeddingVersion() { return embeddingVersion; }
+
+    public Instant getFitCutoff() { return fitCutoff; }
 
     public Instant getUpdatedAt() {
         return updatedAt;

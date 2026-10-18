@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 21 of 30 complete.** The M1 foundation and M2 baseline are
+> 🚧 **Status: Day 22 of 30 complete.** The M1 foundation and M2 baseline are
 > complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 21 checkpoint, the
+The diagram is the end-state funnel. At the current Day 22 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. L2 and re-ranking are scheduled later in the roadmap.
@@ -101,8 +101,12 @@ dataset size, while the schema and ordering contract are stable):
 ```
 
 `score` is the L1 model's positive-class probability in `[0,1]`; the separate
-`mutualConnectionCount` remains available for explanations. Generated
-embeddings are still deterministic placeholders until the Day 22–23 work.
+`mutualConnectionCount` remains available for explanations. The
+default seed still uses deterministic placeholders. Day 22 implements the
+frozen profile TF-IDF/SVD transform and vector export; coordinated live activation
+and compatible feature refresh are scheduled for Day 23, not performed on startup.
+See [the profile-embedding CLI instructions](pymk-ml-training/README.md#day-22-profile-embeddings)
+for runnable fitting and frozen-transform export commands.
 Authentication and abuse controls remain out of scope for this local portfolio
 API, so it should not be exposed publicly as-is.
 
@@ -144,7 +148,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 21.
+`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 22.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -305,6 +309,12 @@ after the ONNX graph passes validation and its probabilities match the fitted
 scikit-learn pipeline. See
 [`pymk-ml-training/README.md`](pymk-ml-training/README.md) for the complete
 contract and verification command.
+
+Model versions are immutable within the output directory: if either output file
+already exists, training refuses that version. Use a new `--model-version` for
+retraining and update both serving artifact paths and `pymk.cache.model-version`.
+The two files publish individually, ONNX first; an interrupted pair is inactive
+and a fresh training attempt must use a new version.
 
 Day 20 consumes that pair of artifacts in `pymk-light-ranker`. The Java loader
 verifies the metadata schema, feature order, tensor types/shapes, positive
@@ -563,6 +573,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       feature-row explanation reuse, versioned cache namespace migration,
       retryable ranker failures, before/after ordering checks, and full API
       integration coverage with materialized features.
+- [x] **Day 22 — Profile embeddings**: frozen, cutoff-safe TF-IDF/SVD transforms,
+      normalized 128-dimensional staging exports, provenance migration, neutral
+      blank-vector retrieval, and shared Python/pgvector semantic-neighbor tests.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

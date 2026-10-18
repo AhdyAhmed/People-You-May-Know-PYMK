@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 pymk-train-light-ranker = "pymk_training.train_light_ranker:main"
+pymk-profile-embeddings = "pymk_training.profile_embeddings:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

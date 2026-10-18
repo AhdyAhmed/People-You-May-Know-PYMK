@@ -15,7 +15,7 @@ from pymk_training.dataset import (
     load_datasets,
     temporal_split,
 )
-from pymk_training.train_light_ranker import train_and_export
+from pymk_training.train_light_ranker import _atomic_write, train_and_export
 
 
 class LightRankerTrainingTest(unittest.TestCase):
@@ -59,6 +59,27 @@ class LightRankerTrainingTest(unittest.TestCase):
             self.assertLessEqual(persisted["split"]["validationLabelThroughInclusive"],
                                  persisted["split"]["test"]["fromInclusive"])
             self.assertFalse(list((root / "models").glob("*.tmp")))
+            original_model = onnx_path.read_bytes()
+            original_metadata = metadata_path.read_bytes()
+            with self.assertRaisesRegex(FileExistsError, "immutable"):
+                train_and_export(inputs, root / "models", "light-logreg-test")
+            self.assertEqual(onnx_path.read_bytes(), original_model)
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
+
+    def test_publication_cannot_overwrite_existing_files_or_partial_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "existing.onnx"
+            path.write_bytes(b"existing release")
+            with self.assertRaises(FileExistsError):
+                _atomic_write(path, b"new release")
+            self.assertEqual(path.read_bytes(), b"existing release")
+            self.assertFalse(list(root.glob("*.tmp")))
+            # A metadata-only interrupted/invalid release reserves its version too.
+            (root / "reserved.metadata.json").write_text("{}")
+            with self.assertRaisesRegex(FileExistsError, "immutable"):
+                train_and_export([], root, "reserved")
+            self.assertFalse((root / "reserved.onnx").exists())
 
     def test_rejects_duplicate_pairs_and_too_few_snapshots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

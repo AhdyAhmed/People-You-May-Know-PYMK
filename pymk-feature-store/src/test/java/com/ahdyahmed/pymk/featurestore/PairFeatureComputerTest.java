@@ -120,6 +120,24 @@ class PairFeatureComputerTest {
                 new PairId(MEMBER, CANDIDATE), COMPUTED_AT.plusSeconds(1), COMPUTED_AT));
     }
 
+    @Test
+    void rejectsMixedEmbeddingSpacesAndTreatsBlankProfilesAsNeutral() {
+        float[] vector = new float[128];
+        vector[0] = 1;
+        embeddings.saveAllAndFlush(List.of(
+                new MemberEmbedding(MEMBER, vector, AS_OF, "profile-svd-v1", AS_OF),
+                new MemberEmbedding(CANDIDATE, vector, AS_OF, "profile-svd-v2", AS_OF)));
+        assertThatThrownBy(() -> computer.compute(new PairId(MEMBER, CANDIDATE), AS_OF, COMPUTED_AT))
+                .isInstanceOf(FeatureInputUnavailableException.class)
+                .hasMessageContaining("different embedding transforms");
+        embeddings.saveAndFlush(new MemberEmbedding(CANDIDATE, new float[128], AS_OF, "profile-svd-v1", AS_OF));
+        assertThat(computer.compute(new PairId(MEMBER, CANDIDATE), AS_OF, COMPUTED_AT)
+                .getEmbeddingCosineSim()).isZero();
+        embeddings.saveAndFlush(new MemberEmbedding(CANDIDATE, vector, AS_OF, "profile-svd-v1", AS_OF.minusSeconds(1)));
+        assertThatThrownBy(() -> computer.compute(new PairId(MEMBER, CANDIDATE), AS_OF, COMPUTED_AT))
+                .isInstanceOf(FeatureInputUnavailableException.class);
+    }
+
     private void connectToSharedNeighbor(
             long memberId, long candidateId, long mutualId, Instant connectedAt) {
         connections.saveAllAndFlush(List.of(

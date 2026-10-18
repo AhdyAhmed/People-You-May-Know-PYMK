@@ -53,6 +53,11 @@ def train_and_export(
     if MODEL_VERSION_PATTERN.fullmatch(model_version) is None:
         raise DatasetValidationError(
             "model version must be 1-128 filename-safe letters, digits, dots, underscores, or hyphens")
+    output_dir = Path(output_dir).expanduser().resolve()
+    onnx_path = output_dir / f"{model_version}.onnx"
+    metadata_path = output_dir / f"{model_version}.metadata.json"
+    if onnx_path.exists() or metadata_path.exists():
+        raise FileExistsError("model versions are immutable; choose a new model version")
     dataset = load_datasets(inputs)
     split = temporal_split(dataset, train_ratio, validation_ratio)
     train_labels = dataset.labels[split.train]
@@ -81,10 +86,7 @@ def train_and_export(
     )
     onnx.checker.check_model(onnx_model)
 
-    output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    onnx_path = output_dir / f"{model_version}.onnx"
-    metadata_path = output_dir / f"{model_version}.metadata.json"
     onnx_bytes = onnx_model.SerializeToString()
     onnx_sha256 = hashlib.sha256(onnx_bytes).hexdigest()
     _verify_onnx_predictions(onnx_bytes, pipeline, dataset.features)
@@ -203,10 +205,10 @@ def _atomic_write(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-    except BaseException:
+        # Publish complete files exclusively; a racing publisher cannot overwrite one.
+        os.link(temporary_path, path)
+    finally:
         temporary_path.unlink(missing_ok=True)
-        raise
 
 
 def _parser() -> argparse.ArgumentParser:

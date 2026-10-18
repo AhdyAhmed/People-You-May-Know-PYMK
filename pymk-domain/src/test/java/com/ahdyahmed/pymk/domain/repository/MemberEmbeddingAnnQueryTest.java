@@ -7,6 +7,9 @@ import com.ahdyahmed.pymk.domain.entity.Member;
 import com.ahdyahmed.pymk.domain.entity.MemberEmbedding;
 import com.ahdyahmed.pymk.domain.support.PostgresDataJpaTest;
 import java.time.Instant;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -103,6 +106,49 @@ class MemberEmbeddingAnnQueryTest {
         assertThat(fromClusterB)
                 .as("of %d neighbors, how many came from cluster B", neighbors.size())
                 .isGreaterThanOrEqualTo((long) (neighbors.size() * 0.9));
+    }
+
+    @Test
+    void exportedPythonProfileVectorsRetrieveSemanticNeighborsAndExcludeBlankAndOtherVersions() throws Exception {
+        Instant asOf = Instant.parse("2026-01-03T00:00:00Z");
+        try (var reader = new BufferedReader(new InputStreamReader(
+                getClass().getResourceAsStream("/embeddings/profile-svd-v1.tsv"), StandardCharsets.UTF_8))) {
+            for (String line : reader.lines().toList()) {
+                String[] columns = line.split("\t");
+                long id = Long.parseLong(columns[0]) + 100;
+                String literal = columns[1];
+                String[] values = literal.substring(1, literal.length() - 1).split(",");
+                float[] vector = new float[128];
+                assertThat(values).hasSize(128);
+                for (int i = 0; i < values.length; i++) vector[i] = Float.parseFloat(values[i].trim());
+                members.saveAndFlush(member(id));
+                embeddings.saveAndFlush(new MemberEmbedding(id, vector, asOf, "profile-svd-v1", asOf));
+            }
+        }
+        assertThat(search.findNearestNeighborIds(101, 10)).containsExactly(102L, 103L);
+        assertThat(search.findNearestUnconnectedNeighbors(101, 10))
+                .extracting(EmbeddingSearchRepository.EmbeddingNeighbor::memberId)
+                .containsExactly(102L, 103L);
+        assertThat(search.findNearestNeighbors(101, 10).getFirst().cosineDistance()).isCloseTo(
+                0.0, org.assertj.core.data.Offset.offset(1e-6));
+        assertThat(search.findNearestNeighborIds(104, 10)).isEmpty();
+        assertThat(search.findNearestNeighborIds(new float[128], null, 10)).isEmpty();
+        var saved = embeddings.findById(101L).orElseThrow();
+        assertThat(saved.getEmbeddingVersion()).isEqualTo("profile-svd-v1");
+        assertThat(saved.getFitCutoff()).isEqualTo(asOf);
+        assertThat(search.findNearestNeighborIds(saved, 10)).containsExactly(102L, 103L);
+        assertThat(search.findNearestNeighborIds(saved.getEmbedding(), 101L, 100))
+                .doesNotContain(102L, 103L, 104L).hasSize(60);
+        assertThat(search.findNearestNeighborIds(saved.getEmbedding(), null, 100))
+                .doesNotContain(101L, 102L, 103L, 104L).hasSize(60);
+
+        // Reusing a version label with a different fit cutoff must not mix spaces.
+        embeddings.saveAndFlush(new MemberEmbedding(102L, saved.getEmbedding(), asOf,
+                "profile-svd-v1", asOf.minusSeconds(1)));
+        assertThat(search.findNearestNeighborIds(101, 10)).containsExactly(103L);
+        assertThat(search.findNearestNeighborIds(saved, 10)).containsExactly(103L);
+        assertThat(search.findNearestUnconnectedNeighbors(101, 10))
+                .extracting(EmbeddingSearchRepository.EmbeddingNeighbor::memberId).containsExactly(103L);
     }
 
     private static double[] constant(int dimensions, double value) {

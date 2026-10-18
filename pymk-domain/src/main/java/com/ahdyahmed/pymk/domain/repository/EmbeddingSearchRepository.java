@@ -1,6 +1,9 @@
 package com.ahdyahmed.pymk.domain.repository;
 
 import com.ahdyahmed.pymk.domain.vector.VectorLiterals;
+import com.ahdyahmed.pymk.domain.entity.MemberEmbedding;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -47,7 +50,10 @@ public class EmbeddingSearchRepository {
                 FROM member_embeddings e1
                 JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
-                ORDER BY cosine_distance
+                  AND e1.embedding_version = e2.embedding_version
+                  AND e1.fit_cutoff IS NOT DISTINCT FROM e2.fit_cutoff
+                  AND vector_norm(e1.embedding) > 0 AND vector_norm(e2.embedding) > 0
+                ORDER BY cosine_distance, e2.member_id
                 LIMIT ?
                 """, (rs, rowNum) -> new EmbeddingNeighbor(
                         rs.getLong("member_id"),
@@ -65,13 +71,16 @@ public class EmbeddingSearchRepository {
                 FROM member_embeddings e1
                 JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
+                  AND e1.embedding_version = e2.embedding_version
+                  AND e1.fit_cutoff IS NOT DISTINCT FROM e2.fit_cutoff
+                  AND vector_norm(e1.embedding) > 0 AND vector_norm(e2.embedding) > 0
                   AND NOT EXISTS (
                         SELECT 1
                         FROM connections c
                         WHERE c.member_id = e1.member_id
                           AND c.connected_member_id = e2.member_id
                   )
-                ORDER BY cosine_distance
+                ORDER BY cosine_distance, e2.member_id
                 LIMIT ?
                 """, (rs, rowNum) -> new EmbeddingNeighbor(
                         rs.getLong("member_id"),
@@ -85,21 +94,49 @@ public class EmbeddingSearchRepository {
      * {@link VectorLiterals}.
      */
     public List<Long> findNearestNeighborIds(float[] vector, Long excludeMemberId, int limit) {
+        // Legacy callers supply no provenance, so they may only query legacy vectors.
+        return findNearestNeighborIds(vector, excludeMemberId, limit, "placeholder-v1", null);
+    }
+
+    /** Query a freshly computed vector in its own frozen transform space. */
+    public List<Long> findNearestNeighborIds(MemberEmbedding query, int limit) {
+        return findNearestNeighborIds(query.getEmbedding(), query.getMemberId(), limit,
+                query.getEmbeddingVersion(), query.getFitCutoff());
+    }
+
+    private List<Long> findNearestNeighborIds(float[] vector, Long excludeMemberId, int limit,
+                                             String version, Instant fitCutoff) {
+        if (vector == null || vector.length != MemberEmbedding.DIMENSIONS) {
+            throw new IllegalArgumentException("Expected a 128-dimensional vector");
+        }
+        boolean nonzero = false;
+        for (float value : vector) {
+            if (!Float.isFinite(value)) throw new IllegalArgumentException("Vector must be finite");
+            nonzero |= value != 0;
+        }
+        if (!nonzero) return List.of();
         String literal = VectorLiterals.toLiteral(vector);
+        Timestamp cutoff = fitCutoff == null ? null : Timestamp.from(fitCutoff);
         if (excludeMemberId != null) {
             return jdbc.queryForList("""
                     SELECT member_id
                     FROM member_embeddings
                     WHERE member_id <> ?
-                    ORDER BY embedding <=> CAST(? AS vector)
+                      AND embedding_version = ?
+                      AND fit_cutoff IS NOT DISTINCT FROM CAST(? AS timestamptz)
+                      AND vector_norm(embedding) > 0
+                    ORDER BY embedding <=> CAST(? AS vector), member_id
                     LIMIT ?
-                    """, Long.class, excludeMemberId, literal, limit);
+                    """, Long.class, excludeMemberId, version, cutoff, literal, limit);
         }
         return jdbc.queryForList("""
                 SELECT member_id
                 FROM member_embeddings
-                ORDER BY embedding <=> CAST(? AS vector)
+                WHERE vector_norm(embedding) > 0
+                  AND embedding_version = ?
+                  AND fit_cutoff IS NOT DISTINCT FROM CAST(? AS timestamptz)
+                ORDER BY embedding <=> CAST(? AS vector), member_id
                 LIMIT ?
-                """, Long.class, literal, limit);
+                """, Long.class, version, cutoff, literal, limit);
     }
 }

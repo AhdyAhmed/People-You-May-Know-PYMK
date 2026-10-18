@@ -148,6 +148,10 @@ public class SnapshotCandidateRepository {
                 WHERE requester_embedding.member_id = ?
                   AND requester_embedding.updated_at <= ?
                   AND candidate_embedding.updated_at <= ?
+                  AND requester_embedding.embedding_version = candidate_embedding.embedding_version
+                  AND requester_embedding.fit_cutoff IS NOT DISTINCT FROM candidate_embedding.fit_cutoff
+                  AND vector_norm(requester_embedding.embedding) > 0
+                  AND vector_norm(candidate_embedding.embedding) > 0
                   AND candidate.created_at <= ?
                   AND NOT EXISTS (
                         SELECT 1

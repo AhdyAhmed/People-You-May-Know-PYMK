@@ -1,0 +1,5 @@
+member_id,headline,company,school,geo_region,created_at,profile_as_of
+1,Java backend engineer distributed systems,Acme,Engineering University,Cairo,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z
+2,Java backend engineer distributed systems,Acme,Engineering University,Cairo,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z
+3,Chef culinary pastry restaurant,Bakery,Cooking Academy,Paris,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z
+4,,,,,2026-01-01T00:00:00Z,2026-01-02T00:00:00Z

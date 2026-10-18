@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 21 complete; Day 22 is next. Target-architecture
+**Current checkpoint:** Day 22 complete; Day 23 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,11 +12,28 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–21 are the implementation record. Unchecked future days below
+Completed Days 1–22 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
 versioned, compatible with serving, and reversible.
+
+### Dependency and acceptance guide
+
+Days 1–22 remain the completed checkpoint. The current audit strengthens their
+artifact and embedding contracts; it does not mark future jobs as implemented.
+Day 23 must supply the minimum coordinated embedding/feature/model activation
+mechanism before live vectors change. Days 24–30 build on that release identity;
+M7 later extends it to scheduled refreshes and reconciliation. Use the existing
+Day 19 trainer for a compatible L1 release when changing embeddings, rather than
+waiting for L2 or reusing placeholder-derived training features.
+
+For every future release, retain a concise evidence record: input/cohort hashes,
+source snapshot and knowledge cutoff, artifact/runtime versions, commands and
+results, known availability limits, and a demonstrated recovery/rollback. Quality
+or load gates need stated metrics and budgets before a promotion; failing them
+keeps the previous release active. Follow the design's section 1.3 dependency
+table and section 7.1 manifest contract when implementing those gates.
 
 ---
 
@@ -29,7 +46,7 @@ versioned, compatible with serving, and reversible.
 
 **Day 2 — Core JPA entities ✅**
 - Implement `Member`, `Connection`, `MemberEvent` entities in `pymk-domain`.
-- Write Flyway/Liquibase migration scripts for the schema (indexes on `connections`).
+- Write Flyway migration scripts for the schema (indexes on `connections`).
 
 **Day 3 — Repositories & basic queries ✅**
 - Spring Data JPA repositories for the three entities.
@@ -127,6 +144,7 @@ versioned, compatible with serving, and reversible.
 - Added chronological train/validation/test splitting at the whole-snapshot level, requiring at least three distinct `feature_as_of` values so no snapshot can cross partition boundaries.
 - Exported the scaler plus classifier to an ONNX opset-17 model and atomically published a metadata report containing feature order, input hashes, temporal boundaries, metrics, coefficients, runtime versions, and the model SHA-256.
 - Validated the ONNX graph and executed it with ONNX Runtime, requiring its probabilities to match scikit-learn; automated tests cover temporal isolation, invalid inputs, artifact contracts, and end-to-end training/export. CI now verifies the Python project alongside the Maven reactor.
+- Day 22 audit: reject an existing ONNX or metadata version before training and publish completed files without overwrite, including concurrent publication attempts. An interrupted pair cannot be promoted; retraining uses a new version and serving verifies the pair's checksum.
 
 **Day 20 — `pymk-light-ranker` serving ✅**
 - Added ONNX Runtime Java model loading with strict validation of the Day 19 metadata schema, six-feature order, input/output tensor contracts, positive class, and model SHA-256; incompatible or corrupted artifacts fail before serving.
@@ -147,24 +165,31 @@ versioned, compatible with serving, and reversible.
 
 ## Week 4 — Heavy Ranker (M4)
 
-**Day 22 — Richer pair features**
-- Replace placeholder vectors with reproducible profile-text + SVD embeddings using a frozen transform and the existing 128-dimensional contract. Cosine similarity already exists in `pymk_features`; do not add it again.
-- Define normalization, neutral blank-profile behavior, small-corpus handling, training cutoff, and version metadata. Test dimensions, finite values, deterministic transforms, and expected neighbor ordering on a meaningful fixture.
-- Keep historical embedding fitting free of future data; introduce explicit version metadata/migrations where required without silently changing existing L1 feature order.
+**Day 22 — Richer pair features ✅**
+- Implemented the runnable Python profile TF-IDF/SVD fit/transform CLI, immutable checksum-validated JSON transforms, and staging CSVs with finite normalized 128-dimensional vectors; blank/tokenless/unseen profiles yield zero vectors and small corpora have deterministic bounded transforms.
+- Required explicit profile observation timestamps and timezone-aware cutoffs; excluded not-yet-created members and rejected unavailable historical profiles and future-fitted transforms. Frozen vocabulary, IDF and SVD components are reused without refitting.
+- Added V6 embedding version/fit-cutoff provenance without changing the six-feature L1 order. Java validates vectors and defensively copies arrays, rejects mixed embedding spaces in pair computation, and excludes neutral vectors and other versions from stored-member cosine retrieval (including batch snapshot retrieval).
+- Shared Python/pgvector fixtures verify semantic neighbors, dimensions and cosine ordering. Tests cover determinism/reload, invalid provenance, blank profiles, small corpora, immutability, checksums and temporal boundaries. Coordinated replacement of the live placeholder generation belongs to Day 23; this CLI never modifies the live database or caches.
+- Verification after the design audit: full `mvn verify` builds all 12 modules with 120 tests and no failures/errors/skips; Python `-W error -m unittest discover -s tests -v` passes 19 tests. Real HTTP/ONNX/PostgreSQL/Redis integration, V6 migration, embedding CLI regression tests and Docker Compose configuration pass. These checks are evidence for this checkpoint, not a guarantee against every future defect.
+- Follow-up audit: validate complete transform metadata and exact component shapes even with a valid checksum; reject ragged/duplicate-header CSVs and conflicting requested versions; handle equivalent bags of words without unstable SVD variance. Scope raw-vector queries to legacy embeddings or require explicit provenance, and compare fit cutoffs as well as versions in online/batch retrieval and pair computation.
 
 **Day 23 — `EmbeddingRefreshJob`**
 - Stage a complete embedding generation with restartable computation, validate coverage and vector contracts, and activate it only after success; failed runs retain the previous active generation.
 - Rematerialize compatible pair features, define cache invalidation and rollback, and verify rerun determinism and interruption/restart behavior. Coordinate model/feature/embedding versions as one serving release.
+- Implement immutable generation IDs and a manifest binding source snapshot, transform hash/cutoff, vector generation, feature schema/generation, model hashes, pipeline and cache release ID. Validate CSV hashes, duplicate/missing members and zero-vector coverage before promotion.
+- Stage compatible features and evaluate/retrain L1 with the existing Day 19 workflow on matching mature snapshots. Switch a single active-release pointer after all gates pass; pin it for each request and reject stale concurrent promoters. Inject import/feature/model failures and prove that active data and rollback remain usable. This prerequisite cannot be deferred to M7 or implemented with the Day 17 in-place writer alone.
 
 **Day 24 — Training data v2 + multi-target labels**
 - Add an explicitly versioned v2 export with directional `invite_sent` and `invite_accepted` outcomes in one mature future window; preserve the existing Day 18/L1 CSV contract.
 - State that both targets are unconditional window outcomes; an acceptance can refer to an invitation sent before the snapshot. Test event types, direction, boundaries, duplicates, absent outcomes, and future-data exclusion.
 - Archive exports before the current live pair table replaces their snapshots. Keep chronological partitions with label horizons ending before the next partition's feature start, and record cohort/feature/embedding versions.
+- Bind each export to one pinned release/source snapshot and document event-time versus knowledge-time reconstruction. Corrected labels/data produce new dataset identities; archived inputs are never silently rewritten for a reported experiment.
 
 **Day 25 — Train the heavy model offline**
 - Train a small PyTorch network with two named probability heads and fixed seeds; fit preprocessing only on training data and export it with the ONNX artifact.
 - Publish versioned metadata for ordered features, tensor shapes, output/label meanings, checksums, training cutoffs, and compatible embedding generations. Require Python/ONNX parity before publishing.
 - Compare against the frozen L1/baseline cohorts; a more complex model is not evidence of improved quality.
+- Fit vocabulary/IDF/SVD/scaling and network parameters on training data only. Validation selects hyperparameters/calibration; each temporal fold pins its upstream transforms and excludes the test feature corpus from fitting.
 
 **Day 26 — `pymk-heavy-ranker` serving**
 - Load the ONNX model via ONNX Runtime Java; batch-score all L1 survivors for a member in one inference call.
@@ -174,6 +199,7 @@ versioned, compatible with serving, and reversible.
 - Script to evaluate the heavy ranker against the held-out time split; log AUC, Precision@k, ECE, and comparison with the mutual-connections baseline.
 - Evaluate the class-weighted L1 scores separately for calibration; use untouched chronological validation data for any calibration fitting and reserve test data for the final report. Do not claim measured acceptance rates before this evidence exists.
 - Define requester-grouped Recall@k/Precision@k denominators and coverage, include prevalence and unavailable single-class metrics, and distinguish full-pool recall from recall within L0 candidates. Compare every variant on the same frozen cohort and report uncertainty.
+- Include blank-profile, new-member, degree and candidate-source cohorts, positives lost at each stage, fixed candidate budgets and requester-bootstrap intervals. Set quality acceptance thresholds before viewing the final test comparison.
 
 **Day 28 — Wire L2 into orchestrator + buffer**
 - Integrate L0 → L1 → L2 with an explicit pipeline/cache version and configurable L1 rollback path. Serve complete results or the existing `503` contract; keep score semantics and OpenAPI/docs synchronized.
@@ -188,6 +214,7 @@ versioned, compatible with serving, and reversible.
 - Add a deterministic diversity pass with a configurable employer/cluster exposure cap; document that this is exposure diversity, not a protected-attribute fairness guarantee.
 - Validate finite nonnegative weights normalized to sum to one. Cache the scored pool before diversity, apply `max(1, floor(capFraction*requestedLimit))` per known group, and return fewer results if constraints are infeasible.
 - Define missing-group behavior, stable ties, and score-vs-display ordering. Version the pipeline and update the Day 21 descending-score smoke contract at this cutover; test limits 1, 2, 20, and 100 and cached requests with different limits.
+- Describe the cap as a count based on requested size, not a guaranteed fraction of an underfilled response. Report returned size and realized group exposure; test heavily concentrated and entirely blank-group pools.
 
 **Day 30 — Bayesian weight tuning (offline)**
 - Search weights against validation data using a declared offline ranking objective; reserve test data for the final evaluation and reject invalid or diversity-breaking weight sets.
@@ -212,17 +239,20 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 - Implement a restart-safe relay that publishes with broker acknowledgements, records publication state, and safely retries without losing events.
 - Claim bounded batches with recoverable leases and preserve aggregate-key order. Test a crash after broker acknowledgement but before the published marker; redelivery must retain the original event ID.
 - Add event ingestion with the database/outbox transaction and the documented `202` response; connection mutations publish their own domain event without inventing an acceptance label.
+- Validate type-specific payloads/member references and clock-skew bounds. Identical event-ID retries return the original receipt; conflicting content returns `409`. Define backlog/admission limits and retain every already-accepted unpublished event during broker outages.
 
 **Day 33 — Idempotent consumers + failure handling**
 - Consume with at-least-once delivery; projection updates and `(consumerName, eventId)` idempotency records commit in one database transaction before offsets are acknowledged.
 - Add bounded exponential-backoff retries and versioned dead-letter topics that retain original record metadata and the failure reason.
 - Define retry ordering explicitly and replay with the original identity. Test duplicate deliveries, conflicting content, crash windows, two independent consumer groups, and DLT recovery; database effects must not be applied twice.
+- Require acknowledged DLT publication before advancing past a poison record. Test DLT publication failure and replay beyond retention; extend deduplication retention or rebuild a fresh projection rather than double-applying old effects.
 
 **Day 34 — Streaming feature freshness + cache invalidation**
 - Project recent profile-view and invite counters separately from historical training snapshots. Count every distinct event in the configured event-time window, including admitted late arrivals; newer timestamps alone must not discard older valid events.
 - Consume connection events for targeted cache invalidation while preserving the existing synchronous invalidation as a correctness safeguard until Kafka reliability is demonstrated.
 - Reconcile streaming state from the nightly `FeatureComputationJob` so replay and recovery cannot create permanent drift.
 - Test late/out-of-order events, duplicate/replayed events, window expiry, versioned state replacement, broker downtime, and recovery; state and cache freshness must converge without contaminating historical labels.
+- Use aggregate sequences for state replacement and identity/window membership for additive counters. Retain event time and ingestion time; explicitly select the historical knowledge boundary during reconciliation/export.
 
 **Day 35 — Kafka resilience, observability, and runbook**
 - Add end-to-end Testcontainers tests covering API → database/outbox → Kafka → consumer/projection, duplicates, retries, dead-letter routing, ordering per key, and broker/consumer restarts.
@@ -231,9 +261,9 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 
 ### Remaining post-Day-30 extensions
 
-- **M7 — Batch operations:** stage full versioned feature generations, validate coverage and atomically activate them, retain a prior generation for rollback, and invalidate matching result caches. Add scheduling/concurrency guards, restartability, Kafka reconciliation, and remaining graph-index/model-sync/evaluation jobs. Failure tests must prove the active generation is unchanged by an incomplete refresh.
-- **M8 — Observability and quality:** bounded source deadlines/concurrency, per-stage timers/counters, separate liveness/readiness, and Prometheus/Grafana dashboards for cache errors, feature age/coverage, model versions, outbox/consumer lag, and DLT recovery. No member IDs in metric labels; test alerts and dependency outage behavior.
-- **M9 — Portfolio release:** one-command startup including Kafka, deterministic seed/model workflow, health plus actual recommendation smoke tests, immutable release manifests and tested rollback, latency/load evidence at a stated scale, and a reproducible baseline-vs-pipeline report. Public deployment requires authentication/authorization, request limits, injected secrets, restricted admin endpoints, and a retention/deletion policy first; Kubernetes remains optional.
+- **M7 — Batch operations:** extend Day 23's generation/activation primitive to scheduled feature refreshes, retain prior generations, and invalidate matching result caches. Add scheduling/concurrency guards, restartability, Kafka reconciliation, and graph-index/model-sync/evaluation jobs. Test incomplete refreshes, competing schedulers, restored database state and retention cleanup; active and rollback-referenced artifacts must survive.
+- **M8 — Observability and quality:** bounded source deadlines/concurrency, per-stage timers/counters, separate liveness/readiness, and Prometheus/Grafana dashboards for cache errors, feature age/coverage, model versions, outbox/consumer lag, and DLT recovery. No member IDs in metric labels; test alerts and dependency outages. Exercise in-flight cache refill after mutation and fence stale writes before promising immediate coherence. Record query plans and exact-versus-ANN recall/latency at fixed resource and candidate budgets.
+- **M9 — Portfolio release:** one-command startup including Kafka, deterministic seed/model workflow, health plus actual recommendation smoke tests, immutable release manifests and tested rollback, latency/load evidence at a stated scale, and a reproducible baseline-vs-pipeline report. Exercise upgrade from the previous checkpoint, database backup/restore and artifact recovery after restart. Public deployment requires authentication/authorization, request limits, injected secrets, restricted admin endpoints, and a retention/deletion policy first; Kubernetes remains optional.
 
 ---
 

@@ -83,9 +83,13 @@ public class FeatureComputationJobConfig {
     @StepScope
     org.springframework.batch.core.step.tasklet.Tasklet validateFeatureSnapshotTasklet(
             PymkPairFeatureRepository features,
+            JdbcTemplate jdbc,
             @Value("#{jobParameters['featureAsOf']}") String featureAsOfParameter) {
         Instant featureAsOf = JobParameterInstants.required(featureAsOfParameter, FEATURE_AS_OF);
         return (contribution, chunkContext) -> {
+            if (jdbc.queryForObject("SELECT release_id IS NOT NULL FROM pymk_active_release", Boolean.class)) {
+                throw new IllegalStateException("A managed release is active; use embeddingRefreshJob to refresh serving features");
+            }
             validateMonotonicSnapshot(featureAsOf, features.findLatestFeatureAsOf());
             return RepeatStatus.FINISHED;
         };

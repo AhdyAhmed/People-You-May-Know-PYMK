@@ -52,6 +52,14 @@ public final class OnnxLightRankerModel implements LightRankerModel {
             byte[] modelBytes = Files.readAllBytes(modelPath.toAbsolutePath().normalize());
             JsonNode metadata = objectMapper.readTree(
                     Files.readAllBytes(metadataPath.toAbsolutePath().normalize()));
+            return load(modelBytes, metadata);
+        } catch (IOException exception) {
+            throw new LightRankerException("Unable to read the L1 model artifact: " + exception.getMessage(), exception);
+        }
+    }
+
+    public static OnnxLightRankerModel load(byte[] modelBytes, JsonNode metadata) {
+        try {
             MetadataContract contract = validateMetadata(metadata, modelBytes);
 
             OrtEnvironment environment = OrtEnvironment.getEnvironment();
@@ -68,8 +76,6 @@ public final class OnnxLightRankerModel implements LightRankerModel {
                 }
                 throw exception;
             }
-        } catch (IOException exception) {
-            throw new LightRankerException("Unable to read the L1 model artifact: " + exception.getMessage(), exception);
         } catch (OrtException exception) {
             throw new LightRankerException("Unable to load the L1 ONNX model: " + exception.getMessage(), exception);
         }

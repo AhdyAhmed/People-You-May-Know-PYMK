@@ -21,6 +21,8 @@ spring:
       initialize-schema: never
 
 pymk:
+  light-ranker:
+    serving-enabled: false
   batch:
     feature-computation:
       chunk-size: 10

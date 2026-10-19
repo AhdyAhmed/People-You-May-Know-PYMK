@@ -31,12 +31,17 @@ public class BulkLoader {
         this.jdbc = jdbc;
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public void truncateAll() {
+        jdbc.queryForObject("SELECT pg_advisory_xact_lock(230023)", Object.class);
+        Long epoch = jdbc.queryForObject("SELECT epoch FROM pymk_active_release", Long.class);
         log.info("Truncating pymk_features, member_events, connections, member_embeddings, members ...");
         jdbc.execute("""
                 TRUNCATE TABLE pymk_features, member_events, connections,
-                    member_embeddings, members RESTART IDENTITY CASCADE
+                    member_embeddings, members, pymk_serving_releases, pymk_embedding_transforms, pymk_legacy_release_model
+                    RESTART IDENTITY CASCADE
                 """);
+        jdbc.update("INSERT INTO pymk_active_release(singleton, epoch) VALUES (true, ?)", epoch + 1);
     }
 
     public void insertMembers(List<MemberRecord> members) {

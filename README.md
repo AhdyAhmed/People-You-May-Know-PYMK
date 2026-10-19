@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 22 of 30 complete.** The M1 foundation and M2 baseline are
+> 🚧 **Status: Day 23 of 30 complete.** The M1 foundation and M2 baseline are
 > complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,7 +29,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 22 checkpoint, the
+The diagram is the end-state funnel. At the current Day 23 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. L2 and re-ranking are scheduled later in the roadmap.
@@ -103,8 +103,10 @@ dataset size, while the schema and ordering contract are stable):
 `score` is the L1 model's positive-class probability in `[0,1]`; the separate
 `mutualConnectionCount` remains available for explanations. The
 default seed still uses deterministic placeholders. Day 22 implements the
-frozen profile TF-IDF/SVD transform and vector export; coordinated live activation
-and compatible feature refresh are scheduled for Day 23, not performed on startup.
+frozen profile TF-IDF/SVD transform and vector export. Day 23 implements coordinated
+live vector/feature/model activation and rollback through explicit batch jobs,
+not on startup. See the [release runbook](docs/DAY23_RELEASES.md) and isolated
+end-to-end smoke script for a complete train-to-serving example.
 See [the profile-embedding CLI instructions](pymk-ml-training/README.md#day-22-profile-embeddings)
 for runnable fitting and frozen-transform export commands.
 Authentication and abuse controls remain out of scope for this local portfolio
@@ -148,7 +150,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 22.
+`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 23.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -576,6 +578,9 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 22 — Profile embeddings**: frozen, cutoff-safe TF-IDF/SVD transforms,
       normalized 128-dimensional staging exports, provenance migration, neutral
       blank-vector retrieval, and shared Python/pgvector semantic-neighbor tests.
+- [x] **Day 23 — Coordinated serving releases**: restartable embedding/feature
+      staging, compatible training exports and ONNX validation, atomic activation,
+      request-pinned database/model/cache versions, durable models and rollback.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

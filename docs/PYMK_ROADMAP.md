@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 22 complete; Day 23 is next. Target-architecture
+**Current checkpoint:** Day 23 complete; Day 24 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,7 +12,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–22 are the implementation record. Unchecked future days below
+Completed Days 1–23 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,10 +20,9 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–22 remain the completed checkpoint. The current audit strengthens their
-artifact and embedding contracts; it does not mark future jobs as implemented.
-Day 23 must supply the minimum coordinated embedding/feature/model activation
-mechanism before live vectors change. Days 24–30 build on that release identity;
+Days 1–23 are the completed checkpoint. Day 23 supplies the coordinated
+embedding/feature/model activation mechanism before live vectors change.
+Days 24–30 build on that release identity;
 M7 later extends it to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
@@ -173,11 +172,14 @@ table and section 7.1 manifest contract when implementing those gates.
 - Verification after the design audit: full `mvn verify` builds all 12 modules with 120 tests and no failures/errors/skips; Python `-W error -m unittest discover -s tests -v` passes 19 tests. Real HTTP/ONNX/PostgreSQL/Redis integration, V6 migration, embedding CLI regression tests and Docker Compose configuration pass. These checks are evidence for this checkpoint, not a guarantee against every future defect.
 - Follow-up audit: validate complete transform metadata and exact component shapes even with a valid checksum; reject ragged/duplicate-header CSVs and conflicting requested versions; handle equivalent bags of words without unstable SVD variance. Scope raw-vector queries to legacy embeddings or require explicit provenance, and compare fit cutoffs as well as versions in online/batch retrieval and pair computation.
 
-**Day 23 — `EmbeddingRefreshJob`**
+**Day 23 — `EmbeddingRefreshJob` ✅**
 - Stage a complete embedding generation with restartable computation, validate coverage and vector contracts, and activate it only after success; failed runs retain the previous active generation.
 - Rematerialize compatible pair features, define cache invalidation and rollback, and verify rerun determinism and interruption/restart behavior. Coordinate model/feature/embedding versions as one serving release.
-- Implement immutable generation IDs and a manifest binding source snapshot, transform hash/cutoff, vector generation, feature schema/generation, model hashes, pipeline and cache release ID. Validate CSV hashes, duplicate/missing members and zero-vector coverage before promotion.
+- Implement immutable generation IDs and a release record binding the staging manifest (source snapshot, transform hash/cutoff, vector generation and candidate budgets) to compatible features/model hashes. Preserve deployment pipeline/cache schema versions and add release ID/epoch to cache keys. Validate CSV hashes, duplicate/missing members and zero-vector coverage before promotion.
 - Stage compatible features and evaluate/retrain L1 with the existing Day 19 workflow on matching mature snapshots. Switch a single active-release pointer after all gates pass; pin it for each request and reject stale concurrent promoters. Inject import/feature/model failures and prove that active data and rollback remain usable. This prerequisite cannot be deferred to M7 or implemented with the Day 17 in-place writer alone.
+- Implemented: V7 release-scoped vectors/features, immutable transform/manifest registry, resumable import/member chunks, source-revision fencing, registered training exports and provenance sidecars, transform-compatible L1 training, AUC/ONNX promotion gates, database-held model artifacts, atomic epoch-checked activation/rollback and request-pinned release cache namespaces. The release record binds the staging manifest to the validated model contract (`pair-v1`); existing pipeline/cache schema configuration remains a deployment setting, not a mutable per-release override.
+- Reproduction and limitations: [Day 23 runbook](DAY23_RELEASES.md). `scripts/day23-release-smoke.ps1` exercises actual Python training, PostgreSQL/pgvector staging, public HTTP/ONNX serving, Redis namespaces and rollback with isolated containers. Automatic scheduling, retention cleanup, production-scale performance and Kafka remain future work.
+- Verified 2026-10-03: full 12-module `mvn verify`, 124 Java tests and 21 Python tests passed; real train-to-HTTP smoke and two rollback transitions passed. See the runbook's verification record for scope and fixture-quality limits.
 
 **Day 24 — Training data v2 + multi-target labels**
 - Add an explicitly versioned v2 export with directional `invite_sent` and `invite_accepted` outcomes in one mature future window; preserve the existing Day 18/L1 CSV contract.

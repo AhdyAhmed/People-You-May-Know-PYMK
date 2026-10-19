@@ -19,6 +19,29 @@ import org.springframework.stereotype.Service;
 @Service
 public class RecommendationOrchestrator {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ahdyahmed.pymk.domain.service.ServingReleaseStore releases;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ahdyahmed.pymk.candidategen.CandidateGenerationProperties candidateProperties;
+    private org.springframework.transaction.support.TransactionTemplate releaseTransaction;
+    private java.util.concurrent.Semaphore requestSlots;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureReleaseTransactions(org.springframework.transaction.PlatformTransactionManager manager,
+            javax.sql.DataSource dataSource,
+            com.ahdyahmed.pymk.candidategen.CandidateGenerationProperties budgets,
+            @org.springframework.beans.factory.annotation.Value("${pymk.serving.max-concurrent-requests:2}") int concurrency) {
+        if (concurrency < 1) throw new IllegalArgumentException("Serving concurrency must be positive");
+        int workers = Math.min(budgets.getMaxConcurrency(), 3 * concurrency);
+        if (dataSource instanceof com.zaxxer.hikari.HikariDataSource hikari
+                && hikari.getMaximumPoolSize() < concurrency + workers + 1) {
+            throw new IllegalStateException("JDBC pool must reserve connections for pinned requests, L0 workers and one writer");
+        }
+        releaseTransaction = new org.springframework.transaction.support.TransactionTemplate(manager);
+        releaseTransaction.setReadOnly(true);
+        requestSlots = new java.util.concurrent.Semaphore(concurrency, true);
+    }
+
     public static final int MAX_RESULTS = 100;
 
     private final L0CandidateGenerator candidateGenerator;
@@ -42,6 +65,35 @@ public class RecommendationOrchestrator {
      * A pipeline failure never masquerades as an empty recommendation list.
      */
     public Optional<RecommendationResult> getRecommendations(long memberId, int limit) {
+        if (releaseTransaction == null) return getConsistentRecommendations(memberId, limit);
+        boolean acquired = false;
+        try {
+            acquired = requestSlots.tryAcquire(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!acquired) throw new RecommendationGenerationException("Recommendation request capacity is exhausted", null);
+            return releaseTransaction.execute(status -> getConsistentRecommendations(memberId, limit));
+        } catch (DataAccessException | org.springframework.transaction.TransactionException ex) {
+            throw new RecommendationGenerationException("Unable to read a consistent serving release", ex);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new RecommendationGenerationException("Interrupted waiting for recommendation capacity", ex);
+        } finally { if (acquired) requestSlots.release(); }
+    }
+
+    private Optional<RecommendationResult> getConsistentRecommendations(long memberId, int limit) {
+        try (var scope = releases == null ? null : releases.pin()) {
+            if (releases != null) {
+                try {
+                    releases.verifyCandidateBudgets(candidateProperties.sourceLimit(CandidateSourceType.GRAPH_WALK),
+                            candidateProperties.sourceLimit(CandidateSourceType.HEURISTIC), candidateProperties.sourceLimit(CandidateSourceType.EMBEDDING));
+                } catch (IllegalStateException ex) { throw new RecommendationGenerationException("Incompatible candidate budgets", ex); }
+            }
+            return getPinnedRecommendations(memberId, limit);
+        } catch (DataAccessException ex) {
+            throw new RecommendationGenerationException("Unable to pin the serving release", ex);
+        }
+    }
+
+    private Optional<RecommendationResult> getPinnedRecommendations(long memberId, int limit) {
         if (memberId <= 0) {
             throw new IllegalArgumentException("memberId must be positive");
         }

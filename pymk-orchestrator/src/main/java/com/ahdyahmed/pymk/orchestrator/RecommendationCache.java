@@ -24,6 +24,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class RecommendationCache {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ahdyahmed.pymk.domain.service.ServingReleaseStore releases;
+
     private static final Logger log = LoggerFactory.getLogger(RecommendationCache.class);
     private static final TypeReference<List<MergedCandidate>> CANDIDATE_LIST = new TypeReference<>() { };
 
@@ -88,7 +91,9 @@ public class RecommendationCache {
 
     /** Check before reading either layer, including when a final result is already cached. */
     public void verifyModelVersion(String loadedModelVersion) {
-        if (properties.isEnabled() && !Objects.equals(properties.getModelVersion(), loadedModelVersion)) {
+        var selected = releases == null ? null : releases.current();
+        String expected = selected != null && selected.modelVersion() != null ? selected.modelVersion() : properties.getModelVersion();
+        if (properties.isEnabled() && !Objects.equals(expected, loadedModelVersion)) {
             throw new LightRankerException("Configured cache model version does not match the loaded L1 model");
         }
     }
@@ -129,12 +134,14 @@ public class RecommendationCache {
             throw new IllegalArgumentException("memberId must be positive");
         }
         properties.validate();
-        return String.join(":",
+        String key = String.join(":",
                 properties.getKeyPrefix(),
                 "schema", properties.getSchemaVersion(),
                 "pipeline", properties.getPipelineVersion(),
                 "model", properties.getModelVersion(),
                 layer, Long.toString(memberId));
+        var selected = releases == null ? null : releases.current();
+        return selected == null || selected.epoch() == 0 ? key : key + ":release:" + selected.namespace();
     }
 
     private <T> Optional<T> read(String key, JsonReader<T> reader) {

@@ -22,6 +22,10 @@ public class SnapshotCandidateRepository {
     }
 
     public List<Long> findCandidates(long memberId, Instant featureAsOf) {
+        return findCandidates(memberId, featureAsOf, null);
+    }
+
+    public List<Long> findCandidates(long memberId, Instant featureAsOf, String releaseId) {
         if (memberId <= 0) {
             throw new IllegalArgumentException("memberId must be positive");
         }
@@ -29,9 +33,17 @@ public class SnapshotCandidateRepository {
         properties.validate();
 
         LinkedHashSet<Long> merged = new LinkedHashSet<>();
+        if (releaseId != null) {
+            // Cover every source before fusion; applying the legacy global cap could
+            // drop a candidate that the online reciprocal-rank union retains.
+            merged.addAll(graphCandidates(memberId, featureAsOf));
+            merged.addAll(heuristicCandidates(memberId, featureAsOf));
+            merged.addAll(embeddingCandidates(memberId, featureAsOf, releaseId));
+            return List.copyOf(merged);
+        }
         addUntilFull(merged, graphCandidates(memberId, featureAsOf));
         addUntilFull(merged, heuristicCandidates(memberId, featureAsOf));
-        addUntilFull(merged, embeddingCandidates(memberId, featureAsOf));
+        addUntilFull(merged, embeddingCandidates(memberId, featureAsOf, null));
         return List.copyOf(merged);
     }
 
@@ -137,9 +149,13 @@ public class SnapshotCandidateRepository {
                 properties.getHeuristicCandidateLimit());
     }
 
-    private List<Long> embeddingCandidates(long memberId, Instant asOf) {
+    private List<Long> embeddingCandidates(long memberId, Instant asOf, String releaseId) {
         Timestamp snapshot = Timestamp.from(asOf);
-        return jdbc.queryForList("""
+        String prefix = releaseId == null ? "" : "WITH member_embeddings AS (SELECT * FROM pymk_release_embeddings WHERE release_id = ?) ";
+        java.util.ArrayList<Object> args = new java.util.ArrayList<>();
+        if (releaseId != null) args.add(releaseId);
+        args.addAll(List.of(memberId, snapshot, snapshot, snapshot, snapshot, properties.getEmbeddingCandidateLimit()));
+        return jdbc.queryForList(prefix + """
                 SELECT candidate_embedding.member_id
                 FROM member_embeddings requester_embedding
                 JOIN member_embeddings candidate_embedding
@@ -163,13 +179,7 @@ public class SnapshotCandidateRepository {
                 ORDER BY requester_embedding.embedding <=> candidate_embedding.embedding,
                          candidate_embedding.member_id
                 LIMIT ?
-                """, Long.class,
-                memberId,
-                snapshot,
-                snapshot,
-                snapshot,
-                snapshot,
-                properties.getEmbeddingCandidateLimit());
+                """, Long.class, args.toArray());
     }
 
     private void addUntilFull(LinkedHashSet<Long> merged, List<Long> candidates) {

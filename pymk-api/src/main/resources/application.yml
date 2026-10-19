@@ -29,6 +29,8 @@ spring:
       timeout: 1s
 
 pymk:
+  serving:
+    max-concurrent-requests: 2
   cache:
     enabled: true
     key-prefix: pymk

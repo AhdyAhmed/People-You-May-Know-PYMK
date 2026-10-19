@@ -41,6 +41,17 @@ public class PairFeatureComputer {
     @Transactional(readOnly = true)
     public PymkPairFeature compute(PairId pairId, Instant featureAsOf, Instant computedAt) {
         Objects.requireNonNull(pairId, "pairId must not be null");
+        var memberVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getMemberId(), featureAsOf);
+        var candidateVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getCandidateId(), featureAsOf);
+        return compute(pairId, featureAsOf, computedAt, memberVector.orElse(null), candidateVector.orElse(null));
+    }
+
+    /** Compute against an explicit staged embedding generation without reading live vectors. */
+    @Transactional(readOnly = true)
+    public PymkPairFeature compute(PairId pairId, Instant featureAsOf, Instant computedAt,
+            com.ahdyahmed.pymk.domain.entity.MemberEmbedding requesterEmbedding,
+            com.ahdyahmed.pymk.domain.entity.MemberEmbedding targetEmbedding) {
+        Objects.requireNonNull(pairId, "pairId must not be null");
         Objects.requireNonNull(featureAsOf, "featureAsOf must not be null");
         Objects.requireNonNull(computedAt, "computedAt must not be null");
         if (featureAsOf.isAfter(computedAt)) {
@@ -59,8 +70,12 @@ public class PairFeatureComputer {
                 featureAsOf.minus(PROFILE_VIEW_WINDOW),
                 featureAsOf));
 
-        var memberVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getMemberId(), featureAsOf);
-        var candidateVector = embeddings.findByMemberIdAndUpdatedAtLessThanEqual(pairId.getCandidateId(), featureAsOf);
+        var memberVector = java.util.Optional.ofNullable(requesterEmbedding).filter(e -> !e.getUpdatedAt().isAfter(featureAsOf));
+        var candidateVector = java.util.Optional.ofNullable(targetEmbedding).filter(e -> !e.getUpdatedAt().isAfter(featureAsOf));
+        if (memberVector.isPresent() && !memberVector.get().getMemberId().equals(pairId.getMemberId())
+                || candidateVector.isPresent() && !candidateVector.get().getMemberId().equals(pairId.getCandidateId())) {
+            throw new IllegalArgumentException("Staged embedding belongs to a different member");
+        }
         if (memberVector.isPresent() && candidateVector.isPresent()
                 && (!memberVector.get().getEmbeddingVersion().equals(candidateVector.get().getEmbeddingVersion())
                     || !Objects.equals(memberVector.get().getFitCutoff(), candidateVector.get().getFitCutoff()))) {

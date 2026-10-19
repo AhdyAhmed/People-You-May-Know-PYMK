@@ -19,6 +19,10 @@
   <dependencies>
     <dependency>
       <groupId>com.ahdyahmed.pymk</groupId>
+      <artifactId>pymk-light-ranker</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.ahdyahmed.pymk</groupId>
       <artifactId>pymk-common</artifactId>
     </dependency>
     <dependency>

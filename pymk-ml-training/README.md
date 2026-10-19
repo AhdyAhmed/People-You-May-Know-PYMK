@@ -104,6 +104,20 @@ model. The Java retrieval and pair-feature paths already understand the new
 provenance and neutral-vector policy. Existing synthetic seeding remains
 `placeholder-v1` until that coordinated cutover.
 
+## Day 23 release-compatible training
+
+Use `python -m pymk_training.release_manifest` to bind an immutable vector CSV
+and frozen transform to a release ID. The Java `embeddingRefreshJob` stages that
+generation and computes compatible features without changing serving.
+`servingReleaseJob action=export` produces registered CSV/provenance pairs.
+Pass `--embedding-transform <transform.json>` to the existing L1 trainer for
+these datasets; it verifies provenance and emits the compatibility metadata
+required for managed activation. Plain Day 18 datasets remain supported for
+legacy training but cannot pass the managed-release promotion gate.
+
+See [the complete runbook](../docs/DAY23_RELEASES.md) and
+`scripts/day23-release-smoke.ps1` for actual training, activation and rollback.
+
 ## Verify
 
 ```powershell

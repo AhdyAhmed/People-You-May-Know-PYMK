@@ -49,6 +49,7 @@ def train_and_export(
     model_version: str,
     train_ratio: float = 0.70,
     validation_ratio: float = 0.15,
+    embedding_transform: Path | None = None,
 ) -> tuple[Path, Path, dict[str, object]]:
     if MODEL_VERSION_PATTERN.fullmatch(model_version) is None:
         raise DatasetValidationError(
@@ -60,6 +61,29 @@ def train_and_export(
         raise FileExistsError("model versions are immutable; choose a new model version")
     dataset = load_datasets(inputs)
     split = temporal_split(dataset, train_ratio, validation_ratio)
+    compatibility = None
+    if embedding_transform is not None:
+        from pymk_training.profile_embeddings import ProfileEmbeddingTransform, timestamp
+        transform = ProfileEmbeddingTransform.load(embedding_transform)
+        transform_hash = hashlib.sha256(embedding_transform.read_bytes()).hexdigest()
+        if timestamp(transform.metadata["fitCutoff"]) > timestamp(min(dataset.feature_as_of)):
+            raise DatasetValidationError("embedding transform was fitted after the earliest training snapshot")
+        releases = []
+        for input_file in dataset.input_files:
+            sidecar = Path(str(input_file["path"]) + ".provenance.json")
+            if not sidecar.is_file():
+                raise DatasetValidationError("release training requires a provenance sidecar for every input")
+            provenance = json.loads(sidecar.read_text(encoding="utf-8"))
+            if (provenance.get("schemaVersion") != 1
+                    or provenance.get("csvSha256") != input_file["sha256"]
+                    or provenance.get("transformSha256") != transform_hash
+                    or provenance.get("embeddingVersion") != transform.metadata["embeddingVersion"]
+                    or not provenance.get("releaseId")):
+                raise DatasetValidationError("training export provenance does not match the frozen transform or CSV")
+            releases.append(provenance["releaseId"])
+        compatibility = {"featureSchema": "pair-v1", "transformSha256": transform_hash,
+                         "embeddingVersion": transform.metadata["embeddingVersion"],
+                         "fitCutoff": transform.metadata["fitCutoff"], "trainingReleases": releases}
     train_labels = dataset.labels[split.train]
     if set(train_labels.tolist()) != {0, 1}:
         raise DatasetValidationError(
@@ -135,6 +159,8 @@ def train_and_export(
         "onnx": {"opset": 17, "sha256": onnx_sha256},
     }
 
+    if compatibility is not None:
+        metadata["embeddingCompatibility"] = compatibility
     _atomic_write(onnx_path, onnx_bytes)
     _atomic_write(
         metadata_path,
@@ -221,6 +247,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-version", default="light-logreg-v1")
     parser.add_argument("--train-ratio", type=float, default=0.70)
     parser.add_argument("--validation-ratio", type=float, default=0.15)
+    parser.add_argument("--embedding-transform", type=Path,
+                        help="Day 23 frozen transform; requires registered release export provenance sidecars")
     return parser
 
 
@@ -233,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_version=arguments.model_version,
             train_ratio=arguments.train_ratio,
             validation_ratio=arguments.validation_ratio,
+            embedding_transform=arguments.embedding_transform,
         )
     except (DatasetValidationError, OSError) as exception:
         print(f"training failed: {exception}", file=sys.stderr)

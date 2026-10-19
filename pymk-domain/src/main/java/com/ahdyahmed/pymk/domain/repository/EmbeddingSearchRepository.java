@@ -47,8 +47,8 @@ public class EmbeddingSearchRepository {
         return jdbc.query("""
                 SELECT e2.member_id,
                        e1.embedding <=> e2.embedding AS cosine_distance
-                FROM member_embeddings e1
-                JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
+                FROM pymk_serving_embeddings e1
+                JOIN pymk_serving_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
                   AND e1.embedding_version = e2.embedding_version
                   AND e1.fit_cutoff IS NOT DISTINCT FROM e2.fit_cutoff
@@ -68,8 +68,8 @@ public class EmbeddingSearchRepository {
         return jdbc.query("""
                 SELECT e2.member_id,
                        e1.embedding <=> e2.embedding AS cosine_distance
-                FROM member_embeddings e1
-                JOIN member_embeddings e2 ON e2.member_id <> e1.member_id
+                FROM pymk_serving_embeddings e1
+                JOIN pymk_serving_embeddings e2 ON e2.member_id <> e1.member_id
                 WHERE e1.member_id = ?
                   AND e1.embedding_version = e2.embedding_version
                   AND e1.fit_cutoff IS NOT DISTINCT FROM e2.fit_cutoff
@@ -120,7 +120,7 @@ public class EmbeddingSearchRepository {
         if (excludeMemberId != null) {
             return jdbc.queryForList("""
                     SELECT member_id
-                    FROM member_embeddings
+                    FROM pymk_serving_embeddings
                     WHERE member_id <> ?
                       AND embedding_version = ?
                       AND fit_cutoff IS NOT DISTINCT FROM CAST(? AS timestamptz)
@@ -131,7 +131,7 @@ public class EmbeddingSearchRepository {
         }
         return jdbc.queryForList("""
                 SELECT member_id
-                FROM member_embeddings
+                FROM pymk_serving_embeddings
                 WHERE vector_norm(embedding) > 0
                   AND embedding_version = ?
                   AND fit_cutoff IS NOT DISTINCT FROM CAST(? AS timestamptz)

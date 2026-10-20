@@ -116,12 +116,30 @@ public class ServingReleaseService {
         if (epoch != actual) throw new IllegalStateException("Stale expectedEpoch; active release changed");
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void exportTraining(String id, Instant labelEnd, Path output) throws Exception {
+        exportTraining(id, labelEnd, output, null);
+    }
+
+    /** A named, immutable v2 dataset. Both labels are unconditional directional outcomes. */
+    @Transactional(rollbackFor = Exception.class)
+    public void exportTrainingV2(String id, Instant labelEnd, Path output, String datasetId) throws Exception {
+        EmbeddingReleaseManifest.requireId(datasetId);
+        // Serialize competing publishers of the same dataset ID before touching files.
+        jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?, 240024))", Object.class, datasetId);
+        if (jdbc.queryForObject("SELECT count(*) FROM pymk_training_datasets_v2 WHERE dataset_id=?", Long.class, datasetId) != 0) {
+            throw new IllegalArgumentException("Dataset ID is immutable; choose a new datasetId");
+        }
+        exportTraining(id, labelEnd, output, datasetId);
+    }
+
+    private void exportTraining(String id, Instant labelEnd, Path output, String datasetId) throws Exception {
+        boolean v2 = datasetId != null;
         staging.lockSources();
         var release = jdbc.queryForMap("""
-                SELECT r.*, t.transform_sha256 FROM pymk_serving_releases r
+                SELECT r.*, t.transform_sha256, t.fit_cutoff FROM pymk_serving_releases r
                 JOIN pymk_embedding_transforms t USING (embedding_version) WHERE release_id=?
+                FOR SHARE OF r, t
                 """, id);
         Instant snapshot = ((Timestamp) release.get("feature_as_of")).toInstant();
         if ("STAGING".equals(release.get("state")) || !labelEnd.isAfter(snapshot) || labelEnd.isAfter(clock.instant())) {
@@ -133,25 +151,34 @@ public class ServingReleaseService {
         Files.createDirectories(output.getParent());
         Path temporary = Files.createTempFile(output.getParent(), ".release-export-", ".tmp");
         long[] count = {0};
+        var cohort = java.security.MessageDigest.getInstance("SHA-256");
         try {
             try (var writer = Files.newBufferedWriter(temporary)) {
-                writer.write(TrainingExample.CSV_HEADER); writer.newLine();
+                writer.write(v2 ? TrainingExample.CSV_V2_HEADER : TrainingExample.CSV_HEADER); writer.write('\n');
                 jdbc.query(con -> {
                     var statement = con.prepareStatement("""
                             SELECT f.*, CASE WHEN EXISTS (SELECT 1 FROM member_events e
                                 WHERE e.actor_member_id=f.member_id AND e.target_member_id=f.candidate_id
                                 AND e.type='INVITE_ACCEPTED' AND e.occurred_at > f.feature_as_of AND e.occurred_at <= ?)
-                                THEN 1 ELSE 0 END AS label FROM pymk_release_features f
+                                THEN 1 ELSE 0 END AS label,
+                                CASE WHEN EXISTS (SELECT 1 FROM member_events e
+                                WHERE e.actor_member_id=f.member_id AND e.target_member_id=f.candidate_id
+                                AND e.type='INVITE_SENT' AND e.occurred_at > f.feature_as_of AND e.occurred_at <= ?)
+                                THEN 1 ELSE 0 END AS invite_sent FROM pymk_release_features f
                             WHERE f.release_id=? ORDER BY member_id, candidate_id
                             """);
-                    statement.setTimestamp(1, Timestamp.from(labelEnd)); statement.setString(2, id); statement.setFetchSize(1000);
+                    statement.setTimestamp(1, Timestamp.from(labelEnd)); statement.setTimestamp(2, Timestamp.from(labelEnd));
+                    statement.setString(3, id); statement.setFetchSize(1000);
                     return statement;
                 }, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                     var row = new TrainingExample(rs.getLong("member_id"), rs.getLong("candidate_id"), rs.getInt("mutual_connection_count"),
                             rs.getBoolean("same_company"), rs.getBoolean("same_school"), rs.getBoolean("same_geo"),
                             rs.getDouble("embedding_cosine_sim"), rs.getInt("profile_view_count_last_30d"), snapshot.minusSeconds(30L*86400),
                             snapshot, labelEnd, rs.getInt("label"));
-                    try { writer.write(row.toCsv()); writer.newLine(); count[0]++; }
+                    try {
+                        writer.write(v2 ? row.toCsvV2(rs.getInt("invite_sent")) : row.toCsv()); writer.write('\n'); count[0]++;
+                        cohort.update((row.memberId() + "," + row.candidateId() + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
                     catch (java.io.IOException ex) { throw new java.io.UncheckedIOException(ex); }
                 });
             }
@@ -162,12 +189,27 @@ public class ServingReleaseService {
                     .put("transformSha256", release.get("transform_sha256").toString())
                     .put("embeddingVersion", release.get("embedding_version").toString())
                     .put("featureAsOf", snapshot.toString()).put("labelWindowEnd", labelEnd.toString());
+            if (v2) {
+                provenance.put("schemaVersion", 2).put("datasetId", datasetId).put("featureSchema", "pair-v1")
+                        .put("rowCount", count[0]).put("cohortSha256", java.util.HexFormat.of().formatHex(cohort.digest()))
+                        .put("releaseManifestSha256", release.get("manifest_sha256").toString())
+                        .put("featureSourceRevision", release.get("source_fingerprint").toString())
+                        .put("labelSourceRevision", staging.revision()).put("exportedAt", clock.instant().toString())
+                        .put("fitCutoff", ((Timestamp) release.get("fit_cutoff")).toInstant().toString())
+                        .put("labelSemantics", "directional-unconditional-(featureAsOf,labelWindowEnd]");
+                provenance.putArray("targets").add("invite_sent").add("invite_accepted");
+            }
             Files.createLink(output, temporary);
             Path sideTemporary = Files.createTempFile(output.getParent(), ".release-provenance-", ".tmp");
             try { Files.write(sideTemporary, EmbeddingReleaseManifest.JSON.writeValueAsBytes(provenance)); Files.createLink(sidecar, sideTemporary); }
             finally { Files.deleteIfExists(sideTemporary); }
-            jdbc.update("INSERT INTO pymk_release_exports(csv_sha256, release_id, label_window_end) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                    hash, id, Timestamp.from(labelEnd));
+            if (v2) {
+                jdbc.update("INSERT INTO pymk_training_datasets_v2(dataset_id,release_id,csv_sha256,provenance,label_window_end) VALUES (?,?,?,CAST(? AS jsonb),?)",
+                        datasetId, id, hash, provenance.toString(), Timestamp.from(labelEnd));
+            } else {
+                jdbc.update("INSERT INTO pymk_release_exports(csv_sha256, release_id, label_window_end) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                        hash, id, Timestamp.from(labelEnd));
+            }
         } finally { Files.deleteIfExists(temporary); }
     }
 }

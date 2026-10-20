@@ -51,16 +51,18 @@ status differ.
 | Public L0 → L1 orchestration and model-versioned caching | Implemented on Day 21 |
 | Frozen profile TF-IDF/SVD embeddings, staging export and vector provenance | Implemented on Day 22 |
 | Coordinated vector/feature/model releases, request pinning and rollback | Implemented on Day 23; see `DAY23_RELEASES.md` |
+| Versioned multi-target exports, immutable dataset lineage and chronological validation | Implemented on Day 24; see `DAY24_DATASETS.md` |
 | Heavy ranker and re-ranker | Planned for Days 25–30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 23 complete**. Target-only sections below use
+The current checkpoint is **Day 24 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
 The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
-embedding generation with coordinated live release activation. Days 24–30 extend it;
+embedding generation with coordinated live release activation and offline multi-target
+datasets. Days 25–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -293,7 +295,7 @@ public class PymkPairFeature {
 - Embeddings are used only when both `updated_at` values are no later than the snapshot; otherwise cosine similarity is the neutral value `0`. Zero vectors also map to `0`, while malformed/non-finite vectors fail fast.
 - Company, school, and geo flags require the same nonblank canonical value. The current synthetic model treats these member attributes as stable; historical profile-version storage is required before mutable production profiles can be backfilled without leakage.
 
-Historical guarantees through Day 23 assume the synthetic source rows are stable.
+Historical guarantees through Day 24 assume the synthetic source rows are stable.
 `occurredAt` says when an event happened, not when the system learned about it.
 M6/M7 replay must also retain `ingestedAt`/source revisions and declare whether a
 dataset reconstructs knowledge available then or later corrected event history.
@@ -371,14 +373,16 @@ partially generated list. This mutual-count value was the temporary public
 - Predicts multiple engagement events per candidate pair: `P(invite_sent)`, `P(invite_accepted)`.
 - Batches all candidates for one member into a single ONNX inference call for efficiency.
 
-The Day 24 export will define both labels as directional outcomes within the
+The implemented Day 24 v2 export defines both labels as directional outcomes within the
 same mature `(featureAsOf, labelWindowEnd]` window. `invite_sent` is an outgoing
 invitation and `invite_accepted` is the existing acceptance outcome. Both heads
 predict unconditional window outcomes, not acceptance conditional on sending.
 An acceptance may concern an invitation sent before the snapshot, so the two
-same-window labels do not automatically imply `accepted <= sent`. Keep the
-Day 18 single-label export compatible; introduce an explicit v2 schema rather
-than silently changing the L1 trainer's input columns.
+same-window labels do not automatically imply `accepted <= sent`. The Day 18
+single-label export stays unchanged. Day 24 adds a separate schema and V8 dataset
+registry, mandatory CSV/cohort/source/embedding provenance and strict Python
+chronological validation. See [the dataset runbook](DAY24_DATASETS.md) for commands,
+late-label correction identities and the event-time/knowledge-time boundary.
 
 The serving artifact will declare ordered features, their schema and embedding
 versions, named outputs, target definitions, tensor dimensions, and a checksum.
@@ -467,7 +471,7 @@ so an old request cannot populate the newly activated release's namespace.
 
 ## 7. Offline Pipeline (Spring Batch)
 
-Frequencies below are intended operational schedules. Through Day 23 the
+Frequencies below are intended operational schedules. Through Day 24 the
 implemented jobs are launched explicitly; automatic scheduling belongs to M7.
 
 | Job | Frequency | Purpose |
@@ -476,6 +480,7 @@ implemented jobs are launched explicitly; automatic scheduling belongs to M7.
 | `TrainingDatasetExportJob` | after a label window matures | **Implemented Day 18:** export snapshot features and future-window acceptance labels to deterministic CSV |
 | `EmbeddingRefreshJob` | weekly (manual today) | **Implemented Day 23:** stage frozen profile vectors and matching pair features; never change the active release |
 | `servingReleaseJob` | explicit operator action | **Implemented Day 23:** export registered training snapshots, validate and activate a compatible L1 release, or roll back with an expected epoch |
+| `servingReleaseJob action=export-v2` | after a label window matures | **Implemented Day 24:** named frozen-release multi-target dataset, immutable CSV/provenance and separate V8 registry |
 | `GraphIndexRebuildJob` | daily | Materialize/refresh any denormalized adjacency structures used by L0 |
 | `ModelSyncJob` | on model release | Planned M7: fetch the exact ONNX artifact named by a validated release manifest; never follow an unversioned latest pointer independently of features |
 | `OfflineEvalJob` | weekly | Compute Recall@k / AUC / Precision@k against a held-out labeled set, log to a metrics table for a "model quality over time" dashboard |

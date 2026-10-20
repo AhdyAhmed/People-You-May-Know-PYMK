@@ -118,6 +118,25 @@ legacy training but cannot pass the managed-release promotion gate.
 See [the complete runbook](../docs/DAY23_RELEASES.md) and
 `scripts/day23-release-smoke.ps1` for actual training, activation and rollback.
 
+## Day 24 multi-target datasets
+
+`servingReleaseJob action=export-v2` creates release-bound CSVs with
+`schema_version=2`, `invite_sent` and `invite_accepted`, plus mandatory provenance
+sidecars. Both targets are directional unconditional outcomes in the same mature
+future window; acceptance without an in-window invitation is valid.
+
+```powershell
+.venv\Scripts\python -m pymk_training.dataset_v2 --input ../artifacts/v2-1.csv --input ../artifacts/v2-2.csv --input ../artifacts/v2-3.csv
+```
+
+The validator checks schema, CSV/cohort hashes, source/embedding lineage and
+chronological partitions with non-overlapping label horizons. Programmatic
+`load_multitarget_datasets` returns two label columns ordered sent, accepted.
+The existing L1 loader/trainer deliberately rejects v2 inputs; L2 training is
+Day 25 work. See [the full v2 runbook](../docs/DAY24_DATASETS.md) for export,
+correction and archive rules. Run the repository smoke script with `-IncludeV2`
+to verify Java exports against this Python reader and exercise serving rollback.
+
 ## Verify
 
 ```powershell

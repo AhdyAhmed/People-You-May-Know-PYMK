@@ -1,12 +1,13 @@
-"""Strict loading and snapshot-level chronological splitting for Day 18 CSVs."""
+"""Strict v1/v2 dataset loading and snapshot-level chronological splitting."""
 
 from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -35,6 +36,8 @@ FEATURE_NAMES = (
     "embedding_cosine_sim",
     "profile_view_count_last_30d",
 )
+
+V2_COLUMNS = ("schema_version",) + CSV_COLUMNS[:-1] + ("invite_sent", "invite_accepted")
 
 
 class DatasetValidationError(ValueError):
@@ -67,14 +70,25 @@ class TemporalSplit:
 
 
 def load_datasets(paths: Iterable[Path]) -> Dataset:
+    return _load_datasets(paths, v2=False)
+
+
+def load_multitarget_datasets(paths: Iterable[Path]) -> Dataset:
+    """Load v2 only; labels[:, 0] is sent, labels[:, 1] is accepted."""
+    return _load_datasets(paths, v2=True)
+
+
+def _load_datasets(paths: Iterable[Path], *, v2: bool) -> Dataset:
     resolved = tuple(Path(path).expanduser().resolve() for path in paths)
     if not resolved:
         raise DatasetValidationError("at least one --input CSV is required")
 
-    parsed_rows: list[tuple[datetime, int, int, list[float], int, datetime]] = []
+    parsed_rows: list[tuple[datetime, int, int, list[float], int | list[int], datetime]] = []
     fingerprints: list[dict[str, object]] = []
     seen_keys: set[tuple[str, int, int]] = set()
     snapshot_windows: dict[str, tuple[str, str]] = {}
+    dataset_ids: set[str] = set()
+    compatibility = None
 
     for path in resolved:
         if not path.is_file():
@@ -84,13 +98,29 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
             "sha256": _sha256(path),
             "bytes": path.stat().st_size,
         })
+        provenance = None
+        file_pairs = []
+        if v2:
+            provenance = _v2_provenance(path, fingerprints[-1]["sha256"])
+            if provenance["datasetId"] in dataset_ids:
+                raise DatasetValidationError("duplicate dataset identity")
+            dataset_ids.add(provenance["datasetId"])
+            identity = (provenance["embeddingVersion"], provenance["transformSha256"],
+                        _canonical_instant(_instant(provenance["fitCutoff"])))
+            if compatibility is not None and compatibility != identity:
+                raise DatasetValidationError("v2 datasets use incompatible embedding transforms")
+            compatibility = identity
+            fingerprints[-1]["provenance"] = provenance
         with path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
-            if tuple(reader.fieldnames or ()) != CSV_COLUMNS:
+            columns = V2_COLUMNS if v2 else CSV_COLUMNS
+            if tuple(reader.fieldnames or ()) != columns:
                 raise DatasetValidationError(
-                    f"unexpected CSV schema in {path}; expected {','.join(CSV_COLUMNS)}")
+                    f"unexpected CSV schema in {path}; expected {','.join(columns)}")
             for line_number, row in enumerate(reader, start=2):
                 try:
+                    if None in row or any(value is None for value in row.values()):
+                        raise DatasetValidationError("CSV row width differs from header")
                     member_id = _positive_int(row["member_id"], "member_id")
                     candidate_id = _positive_int(row["candidate_id"], "candidate_id")
                     if member_id == candidate_id:
@@ -115,7 +145,18 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
                         raise DatasetValidationError(
                             f"duplicate snapshot/pair row: {snapshot}, {member_id}, {candidate_id}")
                     seen_keys.add(key)
-                    label = _binary_int(row["label"], "label")
+                    if v2:
+                        if row["schema_version"] != "2":
+                            raise DatasetValidationError("schema_version must be 2")
+                        if (feature_as_of != _instant(provenance["featureAsOf"])
+                                or label_window_end != _instant(provenance["labelWindowEnd"])):
+                            raise DatasetValidationError("row windows differ from provenance")
+                        if observation_start != feature_as_of - timedelta(days=30):
+                            raise DatasetValidationError("pair-v1 observation window must span 30 days")
+                        label = [_binary_int(row[name], name) for name in ("invite_sent", "invite_accepted")]
+                        file_pairs.append((member_id, candidate_id))
+                    else:
+                        label = _binary_int(row["label"], "label")
                     values = [
                         float(_nonnegative_int(
                             row["mutual_connection_count"], "mutual_connection_count")),
@@ -133,6 +174,11 @@ def load_datasets(paths: Iterable[Path]) -> Dataset:
                 except (DatasetValidationError, ValueError) as exception:
                     raise DatasetValidationError(
                         f"{path}:{line_number}: {exception}") from exception
+        if v2:
+            cohort = hashlib.sha256("".join(f"{m},{c}\n" for m, c in sorted(file_pairs)).encode()).hexdigest()
+            if (not file_pairs or len(file_pairs) != provenance["rowCount"]
+                    or cohort != provenance["cohortSha256"] or _sha256(path) != fingerprints[-1]["sha256"]):
+                raise DatasetValidationError("v2 row count, cohort or CSV checksum mismatch")
 
     if not parsed_rows:
         raise DatasetValidationError("training dataset contains no rows")
@@ -207,6 +253,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _v2_provenance(path: Path, csv_hash: str) -> dict:
+    try:
+        metadata = json.loads(Path(str(path) + ".provenance.json").read_text(encoding="utf-8"))
+        if (metadata["schemaVersion"] != 2 or metadata["csvSha256"] != csv_hash
+                or metadata["featureSchema"] != "pair-v1"
+                or metadata["targets"] != ["invite_sent", "invite_accepted"]
+                or metadata["labelSemantics"] != "directional-unconditional-(featureAsOf,labelWindowEnd]"):
+            raise DatasetValidationError("invalid v2 schema, targets or checksum")
+        for key in ("datasetId", "releaseId", "embeddingVersion"):
+            value = metadata[key]
+            if not isinstance(value, str) or not value.strip():
+                raise DatasetValidationError(f"missing {key}")
+        for key in ("csvSha256", "transformSha256", "cohortSha256", "releaseManifestSha256"):
+            value = metadata[key]
+            if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise DatasetValidationError(f"invalid {key}")
+        for key in ("featureSourceRevision", "labelSourceRevision"):
+            if not isinstance(metadata[key], str) or not metadata[key].isdigit():
+                raise DatasetValidationError(f"invalid {key}")
+        if int(metadata["labelSourceRevision"]) < int(metadata["featureSourceRevision"]):
+            raise DatasetValidationError("label source revision predates feature materialization")
+        if type(metadata["rowCount"]) is not int or metadata["rowCount"] <= 0:
+            raise DatasetValidationError("invalid rowCount")
+        if not (_instant(metadata["fitCutoff"]) <= _instant(metadata["featureAsOf"])
+                < _instant(metadata["labelWindowEnd"]) <= _instant(metadata["exportedAt"])):
+            raise DatasetValidationError("invalid provenance time ordering or immature labels")
+        return metadata
+    except (OSError, KeyError, TypeError, ValueError, AttributeError) as error:
+        raise DatasetValidationError(f"invalid v2 provenance for {path}: {error}") from error
+
+
 def _instant(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -222,15 +299,15 @@ def _canonical_instant(value: datetime) -> str:
 
 def _positive_int(value: str, name: str) -> int:
     parsed = int(value)
-    if parsed <= 0:
-        raise DatasetValidationError(f"{name} must be positive")
+    if not 0 < parsed <= 2**63 - 1:
+        raise DatasetValidationError(f"{name} must be a positive signed 64-bit integer")
     return parsed
 
 
 def _nonnegative_int(value: str, name: str) -> int:
     parsed = int(value)
-    if parsed < 0:
-        raise DatasetValidationError(f"{name} must not be negative")
+    if not 0 <= parsed <= 2**31 - 1:
+        raise DatasetValidationError(f"{name} must be a nonnegative signed 32-bit integer")
     return parsed
 
 

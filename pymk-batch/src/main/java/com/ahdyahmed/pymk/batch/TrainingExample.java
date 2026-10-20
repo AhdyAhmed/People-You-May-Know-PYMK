@@ -32,6 +32,15 @@ public record TrainingExample(
             "label_window_end",
             "label");
 
+    static final String CSV_V2_HEADER = "schema_version," + CSV_HEADER.substring(0, CSV_HEADER.lastIndexOf(','))
+            + ",invite_sent,invite_accepted";
+
+    String toCsvV2(int inviteSent) {
+        if (inviteSent != 0 && inviteSent != 1) throw new IllegalArgumentException("invite_sent must be binary");
+        String v1 = toCsv();
+        return "2," + v1.substring(0, v1.lastIndexOf(',')) + "," + inviteSent + "," + label;
+    }
+
     public TrainingExample {
         if (memberId <= 0 || candidateId <= 0 || memberId == candidateId) {
             throw new IllegalArgumentException("training example pair must contain distinct positive IDs");

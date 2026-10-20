@@ -42,6 +42,7 @@ class EmbeddingReleaseJobTest {
     @Autowired org.springframework.batch.core.launch.JobLauncher launcher;
     @Autowired org.springframework.batch.core.repository.JobRepository jobRepository;
     @Autowired @Qualifier("embeddingRefreshJob") Job job;
+    @Autowired @Qualifier("servingReleaseJob") Job releaseJob;
     @Autowired JdbcTemplate jdbc;
     @Autowired ServingReleaseService publisher;
     @Autowired ServingReleaseStore store;
@@ -189,6 +190,116 @@ class EmbeddingReleaseJobTest {
             activation.get(10, TimeUnit.SECONDS);
             assertThat(store.current().id()).isEqualTo("live");
         }
+    }
+
+    @Test
+    void exportsV2DirectionalUnconditionalLabelsThroughTheRunnableJob() throws Exception {
+        // Existing seed: 1 -> 2 accepted on Jan 5, with no in-window invitation.
+        event(1, 2, "INVITE_SENT", "2026-01-03T00:00:00Z"); // exclusive lower boundary
+        event(1, 2, "INVITE_SENT", "2026-01-10T00:00:00.000001Z"); // after upper boundary
+        event(2, 1, "INVITE_SENT", "2026-01-05T00:00:00Z");
+        event(2, 1, "INVITE_SENT", "2026-01-05T00:00:00Z"); // duplicates remain binary
+        event(2, 1, "INVITE_ACCEPTED", "2026-01-03T00:00:00Z");
+        event(1, 3, "INVITE_SENT", "2026-01-10T00:00:00Z"); // inclusive upper boundary
+        event(1, 3, "INVITE_ACCEPTED", "2026-01-10T00:00:00Z");
+        event(1, 3, "INVITE_ACCEPTED", "2026-01-10T00:00:00Z");
+        event(3, 2, "PROFILE_VIEW", "2026-01-05T00:00:00Z"); // wrong type, future feature signal
+        event(3, 2, "PROFILE_VIEW", "2026-01-02T00:00:00Z"); // valid observation
+        assertThat(run(manifest("history-v2", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        jobs.setJob(releaseJob);
+        Path output = directory.resolve("v2.csv");
+        assertThat(jobs.launchJob(new JobParametersBuilder().addString("action", "export-v2")
+                .addString("releaseId", "history-v2").addString("datasetId", "dataset-v2")
+                .addString("labelWindowEnd", "2026-01-10T00:00:00Z").addString("outputPath", output.toString())
+                .toJobParameters()).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        var lines = Files.readAllLines(output);
+        assertThat(lines).hasSize(7);
+        assertThat(lines.getFirst()).isEqualTo(TrainingExample.CSV_V2_HEADER);
+        assertThat(lines.stream().filter(s -> s.startsWith("2,1,2,")).findFirst().orElseThrow()).endsWith(",0,1");
+        assertThat(lines.stream().filter(s -> s.startsWith("2,2,1,")).findFirst().orElseThrow()).endsWith(",1,0");
+        assertThat(lines.stream().filter(s -> s.startsWith("2,1,3,")).findFirst().orElseThrow()).endsWith(",1,1");
+        for (String pair : java.util.List.of("2,3,1,", "2,3,2,", "2,2,3,")) {
+            assertThat(lines.stream().filter(s -> s.startsWith(pair)).findFirst().orElseThrow()).endsWith(",0,0");
+        }
+        assertThat(lines.stream().filter(s -> s.startsWith("2,3,2,")).findFirst().orElseThrow().split(",")[8]).isEqualTo("1");
+        var provenance = EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(Path.of(output + ".provenance.json")));
+        assertThat(provenance.path("schemaVersion").asInt()).isEqualTo(2);
+        assertThat(provenance.path("rowCount").asInt()).isEqualTo(6);
+        assertThat(provenance.path("csvSha256").asText()).isEqualTo(EmbeddingReleaseManifest.fileHash(output));
+        assertThat(provenance.path("cohortSha256").asText()).isEqualTo(EmbeddingReleaseManifest.sha256("1,2\n1,3\n2,1\n2,3\n3,1\n3,2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_training_datasets_v2", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_release_exports", Long.class)).isZero();
+        assertThat(store.current().epoch()).isZero();
+        Path v1 = directory.resolve("v1.csv");
+        publisher.exportTraining("history-v2", Instant.parse("2026-01-10T00:00:00Z"), v1);
+        assertThat(Files.readAllLines(v1).getFirst()).isEqualTo(TrainingExample.CSV_HEADER);
+    }
+
+    @Test
+    void v2CorrectionsRequireNewIdentityAndNeverRewriteArchivedInputs() throws Exception {
+        assertThat(run(manifest("history-v2", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        Instant end = Instant.parse("2026-01-10T00:00:00Z");
+        Path old = directory.resolve("old.csv");
+        publisher.exportTrainingV2("history-v2", end, old, "original");
+        byte[] archived = Files.readAllBytes(old);
+        var before = EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(Path.of(old + ".provenance.json")));
+        assertThatThrownBy(() -> publisher.exportTrainingV2("history-v2", end, directory.resolve("reuse.csv"), "original"))
+                .hasMessageContaining("Dataset ID is immutable");
+        assertThat(directory.resolve("reuse.csv")).doesNotExist();
+        assertThatThrownBy(() -> publisher.exportTrainingV2("history-v2", end, old, "other"))
+                .hasMessageContaining("immutable");
+        event(1, 2, "INVITE_SENT", "2026-01-09T00:00:00Z"); // late, corrected historical label
+        Path corrected = directory.resolve("corrected.csv");
+        publisher.exportTrainingV2("history-v2", end, corrected, "corrected");
+        var after = EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(Path.of(corrected + ".provenance.json")));
+        assertThat(Files.readAllBytes(old)).isEqualTo(archived);
+        assertThat(after.path("csvSha256")).isNotEqualTo(before.path("csvSha256"));
+        assertThat(after.path("featureSourceRevision")).isEqualTo(before.path("featureSourceRevision"));
+        assertThat(after.path("labelSourceRevision")).isNotEqualTo(before.path("labelSourceRevision"));
+        assertThat(after.path("cohortSha256")).isEqualTo(before.path("cohortSha256"));
+        for (Instant invalid : java.util.List.of(HISTORICAL, Instant.parse("2027-01-01T00:00:00Z"))) {
+            assertThatThrownBy(() -> publisher.exportTrainingV2("history-v2", invalid, directory.resolve("invalid.csv"), "invalid"))
+                    .hasMessageContaining("mature future label window");
+        }
+        assertThat(directory.resolve("invalid.csv")).doesNotExist();
+        jdbc.update("UPDATE pymk_serving_releases SET state='STAGING' WHERE release_id='history-v2'");
+        assertThatThrownBy(() -> publisher.exportTrainingV2("history-v2", end, directory.resolve("partial.csv"), "partial"))
+                .hasMessageContaining("completed staging");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_training_datasets_v2", Long.class)).isEqualTo(2);
+    }
+
+    @Test
+    void competingV2PublishersCannotReuseDatasetIdentity() throws Exception {
+        assertThat(run(manifest("history-v2", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        var start = new CountDownLatch(1);
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            var attempts = java.util.stream.IntStream.range(0, 2).mapToObj(i -> workers.submit(() -> {
+                start.await();
+                try { publisher.exportTrainingV2("history-v2", Instant.parse("2026-01-10T00:00:00Z"), directory.resolve("race-" + i + ".csv"), "race"); return true; }
+                catch (IllegalArgumentException ex) { assertThat(ex).hasMessageContaining("Dataset ID is immutable"); return false; }
+            })).toList();
+            start.countDown();
+            int successes = 0;
+            for (var attempt : attempts) if (attempt.get(10, TimeUnit.SECONDS)) successes++;
+            assertThat(successes).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_training_datasets_v2", Long.class)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void v2JobRejectsMissingIdentityAndInvalidDatesBeforeExecution() {
+        var missing = new JobParametersBuilder().addString("action", "export-v2").addString("releaseId", "history");
+        assertThatThrownBy(() -> releaseJob.getJobParametersValidator().validate(missing.toJobParameters()))
+                .isInstanceOf(org.springframework.batch.core.JobParametersInvalidException.class);
+        var invalidDate = missing.addString("datasetId", "dataset").addString("labelWindowEnd", "not-a-date")
+                .addString("outputPath", directory.resolve("invalid.csv").toString());
+        assertThatThrownBy(() -> releaseJob.getJobParametersValidator().validate(invalidDate.toJobParameters()))
+                .isInstanceOf(org.springframework.batch.core.JobParametersInvalidException.class);
+        assertThat(directory.resolve("invalid.csv")).doesNotExist();
+    }
+
+    private void event(long from, long to, String type, String at) {
+        jdbc.update("INSERT INTO member_events(actor_member_id,target_member_id,type,occurred_at) VALUES(?,?,?,?::timestamptz)", from, to, type, at);
     }
 
     private org.springframework.batch.core.JobExecution run(Path manifest, long run) throws Exception {

@@ -1,4 +1,4 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe")
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 $run = [guid]::NewGuid().ToString('N').Substring(0, 10)
@@ -60,6 +60,8 @@ INSERT INTO members(id,full_name,headline,company,school,geo_region,created_at) 
 INSERT INTO member_events(actor_member_id,target_member_id,type,occurred_at)
 SELECT a,b,'INVITE_ACCEPTED',d::timestamptz FROM (VALUES (1,2),(2,1)) p(a,b)
 CROSS JOIN (VALUES ('2026-01-05'),('2026-01-12'),('2026-01-19')) dates(d);
+INSERT INTO member_events(actor_member_id,target_member_id,type,occurred_at)
+SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11'),('2026-01-18')) dates(d);
 '@ | Out-Null
     $transform = "$output/transform.json"
     $snapshots = @('2026-01-03','2026-01-10','2026-01-17','2026-02-01')
@@ -74,9 +76,17 @@ CROSS JOIN (VALUES ('2026-01-05'),('2026-01-12'),('2026-01-19')) dates(d);
         if ($i -lt 3) {
             $labelEnd = @('2026-01-10','2026-01-17','2026-01-24')[$i]
             Batch @('--spring.batch.job.name=servingReleaseJob','action=export',"releaseId=$id","labelWindowEnd=${labelEnd}T00:00:00Z","outputPath=$output/train-$i.csv")
+            if ($IncludeV2) {
+                Batch @('--spring.batch.job.name=servingReleaseJob','action=export-v2',"releaseId=$id","datasetId=smoke-v2-$i","labelWindowEnd=${labelEnd}T00:00:00Z","outputPath=$output/v2-$i.csv")
+            }
         }
     }
     Checked $Python @('-m','pymk_training.train_light_ranker','--input',"$output/train-0.csv",'--input',"$output/train-1.csv",'--input',"$output/train-2.csv",'--output-dir',"$output/model",'--model-version','release-logreg-v1','--embedding-transform',$transform)
+    if ($IncludeV2) {
+        Checked $Python @('-m','pymk_training.dataset_v2','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv")
+        if ((Sql 'SELECT count(*) FROM pymk_training_datasets_v2') -ne '3') { throw 'Missing v2 dataset registrations' }
+        Write-Host 'PASS: Day 24 v2 exports, provenance and chronological partitions validated in Python'
+    }
     $model = "$output/model/release-logreg-v1.onnx"
     $metadata = "$output/model/release-logreg-v1.metadata.json"
     # A complete legacy baseline makes rollback exercise the public API too.

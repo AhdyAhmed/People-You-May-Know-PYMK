@@ -2,6 +2,8 @@
 
 Offline Python training project for PYMK models. Day 19 implements the L1
 logistic-regression baseline and exports it to ONNX for Day 20 Java serving.
+Day 25 adds a real two-head PyTorch heavy model and validated ONNX export;
+the live API remains L0 → L1 until the scheduled L2 cutover.
 
 ## Setup
 
@@ -9,7 +11,8 @@ logistic-regression baseline and exports it to ONNX for Day 20 Java serving.
 cd pymk-ml-training
 python -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip
-.venv\Scripts\python -m pip install -e .
+.venv\Scripts\python -m pip install "torch>=2.6,<3" --index-url https://download.pytorch.org/whl/cpu
+.venv\Scripts\python -m pip install -e ".[heavy]"
 ```
 
 ## Train the Day 19 light ranker
@@ -132,10 +135,26 @@ future window; acceptance without an in-window invitation is valid.
 The validator checks schema, CSV/cohort hashes, source/embedding lineage and
 chronological partitions with non-overlapping label horizons. Programmatic
 `load_multitarget_datasets` returns two label columns ordered sent, accepted.
-The existing L1 loader/trainer deliberately rejects v2 inputs; L2 training is
-Day 25 work. See [the full v2 runbook](../docs/DAY24_DATASETS.md) for export,
+The existing L1 loader/trainer deliberately rejects v2 inputs; the Day 25 heavy
+trainer consumes them. See [the full v2 runbook](../docs/DAY24_DATASETS.md) for export,
 correction and archive rules. Run the repository smoke script with `-IncludeV2`
 to verify Java exports against this Python reader and exercise serving rollback.
+
+## Day 25 heavy training
+
+Use `python -m pymk_training.train_heavy_ranker` (or `pymk-train-heavy-ranker`)
+with repeated `--input` v2 exports, `--embedding-transform`, `--l1-model`,
+`--l1-metadata`, `--output-dir` and a new `--model-version`.
+It trains a seeded CPU MLP with two independent heads, fits scaling only on
+training data, selects a checkpoint using validation loss and publishes immutable
+ONNX/metadata after real PyTorch/ONNX parity checks. The frozen L1 input files
+must remain available for exact cohort comparison. See the
+[complete training runbook](../docs/DAY25_HEAVY_TRAINING.md) for runnable commands,
+named tensor contracts, artifact rules and metric limitations.
+
+The smoke script's `-IncludeHeavy` switch trains both models on fresh Java exports
+and then verifies the unchanged L1 HTTP/rollback path. Java L2 serving remains
+Day 26; heavy training never changes the active application release.
 
 ## Verify
 

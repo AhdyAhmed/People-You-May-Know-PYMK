@@ -15,9 +15,13 @@ dependencies = [
     "skl2onnx>=1.18,<2",
 ]
 
+[project.optional-dependencies]
+heavy = ["torch>=2.6,<3"]
+
 [project.scripts]
 pymk-train-light-ranker = "pymk_training.train_light_ranker:main"
 pymk-profile-embeddings = "pymk_training.profile_embeddings:main"
+pymk-train-heavy-ranker = "pymk_training.train_heavy_ranker:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 24 complete; Day 25 is next. Target-architecture
+**Current checkpoint:** Day 25 complete; Day 26 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,7 +12,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–24 are the implementation record. Unchecked future days below
+Completed Days 1–25 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,9 +20,10 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–24 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–25 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
-Day 24 adds release-bound multi-target datasets; Days 25–30 build on that identity;
+Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
+Days 26–30 build on those artifacts;
 M7 later extends it to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
@@ -189,11 +190,13 @@ table and section 7.1 manifest contract when implementing those gates.
 - Implemented `servingReleaseJob action=export-v2`, V8's separate immutable dataset registry, binary unconditional labels, per-row schema version, CSV/cohort hashes, source/feature/embedding provenance, concurrent-publisher fencing and the strict Python v2 loader/chronological-split CLI. Existing L1 exports/training remain v1. See [Day 24 runbook](DAY24_DATASETS.md); the extended smoke runs with `-IncludeV2`. L2 training/serving remain Days 25–26, not part of this checkpoint.
 - Verification completed 2026-10-04: all 12 Maven modules, 128 Java tests and 27 Python tests passed; real Java-to-Python v2 export validation, existing L1 training/HTTP serving and both rollback transitions passed. Detailed evidence and limitations are recorded in the runbook.
 
-**Day 25 — Train the heavy model offline**
+**Day 25 — Train the heavy model offline ✅**
 - Train a small PyTorch network with two named probability heads and fixed seeds; fit preprocessing only on training data and export it with the ONNX artifact.
 - Publish versioned metadata for ordered features, tensor shapes, output/label meanings, checksums, training cutoffs, and compatible embedding generations. Require Python/ONNX parity before publishing.
 - Compare against the frozen L1/baseline cohorts; a more complex model is not evidence of improved quality.
 - Fit vocabulary/IDF/SVD/scaling and network parameters on training data only. Validation selects hyperparameters/calibration; each temporal fold pins its upstream transforms and excludes the test feature corpus from fitting.
+- Implemented seeded, single-thread CPU PyTorch MLP with train-only scaling, validation-loss checkpoint selection, two named dynamic ONNX probability outputs, actual runtime parity, immutable artifacts and complete v2/embedding provenance. Reports frozen-L1 acceptance and mutual-count ranking comparisons on identical cohorts; single-class AUC/AP remain unavailable. No calibration or automatic promotion is claimed. See [Day 25 runbook](DAY25_HEAVY_TRAINING.md); `-IncludeHeavy` extends the isolated smoke while public serving remains L0 → L1.
+- Verified 2026-10-04: all 12 Maven modules, 128 Java tests and 33 Python tests passed; extended fresh-export/training/ONNX/HTTP/rollback smoke, dependency checks and Compose configuration passed. See the runbook's evidence record; L2 Java serving remains Day 26.
 
 **Day 26 — `pymk-heavy-ranker` serving**
 - Load the ONNX model via ONNX Runtime Java; batch-score all L1 survivors for a member in one inference call.

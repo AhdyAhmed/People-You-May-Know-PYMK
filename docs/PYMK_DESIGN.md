@@ -52,17 +52,18 @@ status differ.
 | Frozen profile TF-IDF/SVD embeddings, staging export and vector provenance | Implemented on Day 22 |
 | Coordinated vector/feature/model releases, request pinning and rollback | Implemented on Day 23; see `DAY23_RELEASES.md` |
 | Versioned multi-target exports, immutable dataset lineage and chronological validation | Implemented on Day 24; see `DAY24_DATASETS.md` |
-| Heavy ranker and re-ranker | Planned for Days 25–30 |
+| Offline PyTorch two-head training, ONNX export and frozen-cohort comparisons | Implemented on Day 25; see `DAY25_HEAVY_TRAINING.md` |
+| Heavy-ranker Java serving, public cutover and re-ranker | Planned for Days 26–30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 24 complete**. Target-only sections below use
+The current checkpoint is **Day 25 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
 The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
-datasets. Days 25–30 extend it;
+datasets plus offline heavy-model training. Days 26–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -367,6 +368,14 @@ partially generated list. This mutual-count value was the temporary public
 - Public scores are positive-class outputs from a class-weighted classifier, not measured acceptance rates. Calibration remains an explicit Day 27 evaluation task; `[0,1]` bounds alone do not establish calibration.
 
 ### Stage L2 — Heavy Ranker
+
+**Day 25 implemented offline:** CPU PyTorch `6 → 16 ReLU → two sigmoid heads`,
+training-only scaling, validation-loss checkpoint selection and immutable opset-17
+ONNX/metadata export. The scaler and trained weights are serialized with standard
+ONNX operators; runtime parity checks cover empty/single/multi-row batches before
+publication. Frozen L1 and mutual-count comparisons use identical cohorts and
+chronological partitions. See [the training runbook](DAY25_HEAVY_TRAINING.md).
+The API still uses L1; Java L2 serving starts on Day 26 and cutover on Day 28.
 **Goal:** precisely rank the few hundred remaining candidates. Evaluated by **AUC / Precision@k / ECE** (calibration matters because these scores feed the re-ranker).
 
 - Deep model (small feed-forward NN) trained offline in Python, exported to **ONNX**, served via **ONNX Runtime Java API** inside `pymk-heavy-ranker`.

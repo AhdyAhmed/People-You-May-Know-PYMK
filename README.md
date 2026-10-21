@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 24 of 30 complete.** The M1 foundation and M2 baseline are
+> 🚧 **Status: Day 25 of 30 complete.** The M1 foundation and M2 baseline are
 > complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,10 +29,11 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 24 checkpoint, the
+The diagram is the end-state funnel. At the current Day 25 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
-the public endpoint. L2 and re-ranking are scheduled later in the roadmap.
+the public endpoint. Offline L2 training is implemented; Java L2 serving,
+public cutover and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -150,7 +151,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 24.
+`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 25.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -585,6 +586,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       labels, immutable dataset registry and CSV/provenance, late-correction
       identities, strict Python validation and leakage-safe temporal partitions.
       See the [v2 export runbook](docs/DAY24_DATASETS.md). The live API remains L0 → L1.
+- [x] **Day 25 — Offline heavy model**: seeded two-head PyTorch training,
+      train-only preprocessing, validation-selected checkpoint, named ONNX
+      outputs/parity and immutable artifacts with frozen-baseline comparisons.
+      See the [training runbook](docs/DAY25_HEAVY_TRAINING.md). No L2 serving cutover yet.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

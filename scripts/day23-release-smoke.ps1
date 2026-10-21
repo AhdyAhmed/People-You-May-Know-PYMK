@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy)
+if ($IncludeHeavy) { $IncludeV2 = $true }
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 $run = [guid]::NewGuid().ToString('N').Substring(0, 10)
@@ -89,6 +90,10 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     }
     $model = "$output/model/release-logreg-v1.onnx"
     $metadata = "$output/model/release-logreg-v1.metadata.json"
+    if ($IncludeHeavy) {
+        Checked $Python @('-m','pymk_training.train_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--output-dir',"$output/heavy",'--model-version','heavy-mlp-v1','--embedding-transform',$transform,'--l1-model',$model,'--l1-metadata',$metadata)
+        Write-Host 'PASS: Day 25 two-head PyTorch training, named ONNX parity and frozen-cohort comparisons'
+    }
     # A complete legacy baseline makes rollback exercise the public API too.
     Sql "INSERT INTO member_embeddings SELECT member_id,embedding,updated_at,embedding_version,fit_cutoff FROM pymk_release_embeddings WHERE release_id='release-3'; INSERT INTO pymk_features SELECT member_id,candidate_id,mutual_connection_count,same_company,same_school,same_geo,embedding_cosine_sim,profile_view_count_last_30d,feature_as_of,computed_at FROM pymk_release_features WHERE release_id='release-3'" | Out-Null
     Batch @('--spring.batch.job.name=servingReleaseJob','action=activate','releaseId=release-3','expectedEpoch=0',"modelPath=$model","metadataPath=$metadata","legacyModelPath=$model","legacyMetadataPath=$metadata")

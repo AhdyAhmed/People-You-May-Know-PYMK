@@ -1,8 +1,7 @@
 /**
  * L2: DNN heavy ranker served via ONNX Runtime Java.
  *
- * <p>Deliberately empty on Day 1 - this module exists so the multi-module
- * build wiring, dependency graph, and package layout are correct before any
- * real logic lands (see PYMK_ROADMAP.md, Week 1).</p>
+ * <p>Day 26 implements release-pinned batch feature reads and contract-validated
+ * two-head inference. Public orchestration cutover remains Day 28.</p>
  */
 package com.ahdyahmed.pymk.heavyranker;

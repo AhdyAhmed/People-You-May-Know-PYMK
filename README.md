@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 25 of 30 complete.** The M1 foundation and M2 baseline are
+> 🚧 **Status: Day 26 of 30 complete.** The M1 foundation and M2 baseline are
 > complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,11 +29,11 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 25 checkpoint, the
+The diagram is the end-state funnel. At the current Day 26 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
-the public endpoint. Offline L2 training is implemented; Java L2 serving,
-public cutover and re-ranking are scheduled later in the roadmap.
+the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
+implemented; public cutover and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -151,7 +151,7 @@ pymk/
 
 `pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
 `pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, and `pymk-light-ranker` have real content as of Day 25.
+`pymk-ml-training`, `pymk-light-ranker`, and `pymk-heavy-ranker` have real content as of Day 26.
 The remaining modules are intentionally
 skeletal; see the roadmap for what fills in each module and when.
 
@@ -590,6 +590,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       train-only preprocessing, validation-selected checkpoint, named ONNX
       outputs/parity and immutable artifacts with frozen-baseline comparisons.
       See the [training runbook](docs/DAY25_HEAVY_TRAINING.md). No L2 serving cutover yet.
+- [x] **Day 26 — Java heavy scorer**: real batched ONNX inference with both named
+      probability heads, release/feature compatibility checks, Python parity and
+      safe resource cleanup. See the [serving runbook](docs/DAY26_HEAVY_SERVING.md).
+      Public HTTP scoring remains L1 until Day 28.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

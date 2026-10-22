@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy)
+if ($IncludeJavaHeavy) { $IncludeHeavy = $true }
 if ($IncludeHeavy) { $IncludeV2 = $true }
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
@@ -93,6 +94,14 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     if ($IncludeHeavy) {
         Checked $Python @('-m','pymk_training.train_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--output-dir',"$output/heavy",'--model-version','heavy-mlp-v1','--embedding-transform',$transform,'--l1-model',$model,'--l1-metadata',$metadata)
         Write-Host 'PASS: Day 25 two-head PyTorch training, named ONNX parity and frozen-cohort comparisons'
+        if ($IncludeJavaHeavy) {
+            $fixture = "$output/heavy/java-fixture.json"
+            & $Python -m pymk_training.heavy_serving_fixture --model "$output/heavy/heavy-mlp-v1.onnx" --metadata "$output/heavy/heavy-mlp-v1.metadata.json" > $fixture
+            if ($LASTEXITCODE -ne 0) { throw 'Java parity fixture export failed' }
+            & mvn -pl pymk-heavy-ranker -am '-Dtest=OnnxHeavyRankerModelTest' '-Dsurefire.failIfNoSpecifiedTests=false' "-Dpymk.heavy.fixture=$fixture" test *> "$output/heavy/java-parity.log"
+            if ($LASTEXITCODE -ne 0) { throw "Java L2 parity failed: $output/heavy/java-parity.log" }
+            Write-Host 'PASS: Day 26 Java L2 named-head parity, invalid-model rejection and lifecycle checks against the freshly trained model'
+        }
     }
     # A complete legacy baseline makes rollback exercise the public API too.
     Sql "INSERT INTO member_embeddings SELECT member_id,embedding,updated_at,embedding_version,fit_cutoff FROM pymk_release_embeddings WHERE release_id='release-3'; INSERT INTO pymk_features SELECT member_id,candidate_id,mutual_connection_count,same_company,same_school,same_geo,embedding_cosine_sim,profile_view_count_last_30d,feature_as_of,computed_at FROM pymk_release_features WHERE release_id='release-3'" | Out-Null
@@ -101,6 +110,9 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
     $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json")
+    if ($IncludeJavaHeavy) {
+        $apiArgs += @('--pymk.heavy-ranker.enabled=true',"--pymk.heavy-ranker.model-path=$output/heavy/heavy-mlp-v1.onnx","--pymk.heavy-ranker.metadata-path=$output/heavy/heavy-mlp-v1.metadata.json")
+    }
     $quoted = $apiArgs | ForEach-Object { '"' + $_ + '"' }
     $api = Start-Process java -ArgumentList $quoted -PassThru -WindowStyle Hidden -RedirectStandardOutput "$output/api.log" -RedirectStandardError "$output/api-error.log"
     $ready = $false

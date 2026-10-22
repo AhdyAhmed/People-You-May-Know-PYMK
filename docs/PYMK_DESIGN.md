@@ -53,17 +53,18 @@ status differ.
 | Coordinated vector/feature/model releases, request pinning and rollback | Implemented on Day 23; see `DAY23_RELEASES.md` |
 | Versioned multi-target exports, immutable dataset lineage and chronological validation | Implemented on Day 24; see `DAY24_DATASETS.md` |
 | Offline PyTorch two-head training, ONNX export and frozen-cohort comparisons | Implemented on Day 25; see `DAY25_HEAVY_TRAINING.md` |
-| Heavy-ranker Java serving, public cutover and re-ranker | Planned for Days 26–30 |
+| Batched, release-compatible Java heavy scorer with two named probability heads | Implemented on Day 26; see `DAY26_HEAVY_SERVING.md` |
+| Public L2 cutover and re-ranker | Planned for Days 28–30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 25 complete**. Target-only sections below use
+The current checkpoint is **Day 26 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
 The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
-datasets plus offline heavy-model training. Days 26–30 extend it;
+datasets plus offline heavy-model training and an opt-in Java L2 scorer. Days 27–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -281,7 +282,7 @@ public class PymkPairFeature {
 ### 5.2 Schema notes
 - `connections` is denormalized as a symmetric edge list with indexed adjacency lookup. Returning neighbors still scales with member degree; an index does not make a full adjacency read constant-time.
 - `member_embeddings` uses **pgvector** so L0's embedding-based retrieval (EBR) source can do an ANN (`<=>` cosine distance) query directly in Postgres without a separate vector DB for portfolio scale. Documented upgrade path: Qdrant/Milvus for production scale.
-- `pymk_features` is the **feature store** table: precomputed member-candidate pair features refreshed by the manually launched Spring Batch job at this checkpoint, read by L1 at serving time. Nightly scheduling and L2 consumption are planned.
+- `pymk_features` is the legacy **feature store** table; managed generations use `pymk_release_features`. The active serving view supplies materialized member-candidate features to L1 and the opt-in L2 component. Refresh remains a manually launched Spring Batch job; nightly scheduling is planned.
 
 ### 5.3 Data invariants
 
@@ -375,7 +376,18 @@ ONNX/metadata export. The scaler and trained weights are serialized with standar
 ONNX operators; runtime parity checks cover empty/single/multi-row batches before
 publication. Frozen L1 and mutual-count comparisons use identical cohorts and
 chronological partitions. See [the training runbook](DAY25_HEAVY_TRAINING.md).
-The API still uses L1; Java L2 serving starts on Day 26 and cutover on Day 28.
+The API still uses L1; Java L2 scoring is implemented on Day 26 and public cutover
+remains Day 28. `L2HeavyRanker` pins a managed release in a read transaction,
+validates embedding version/transform hash/fit cutoff and model selection cutoff,
+loads all survivor features in one query, then runs one dynamic ONNX batch.
+It returns both named probabilities in L1 order with release epoch/model provenance;
+there is no silent truncation, zero-filling, blending or independent head sorting.
+Artifact loading validates SHA-256, ordered features, named dynamic float32 tensors
+and output semantics. Inference validates finite probabilities in [0,1]; native
+inputs/results are scoped and model close is serialized against concurrent inference.
+Spring loading is explicit opt-in; missing/invalid enabled artifacts fail startup.
+See `DAY26_HEAVY_SERVING.md`. Day 28 must pin the entire L0/L1/L2 request together
+and version cache semantics before exposing heavy scores publicly.
 **Goal:** precisely rank the few hundred remaining candidates. Evaluated by **AUC / Precision@k / ECE** (calibration matters because these scores feed the re-ranker).
 
 - Deep model (small feed-forward NN) trained offline in Python, exported to **ONNX**, served via **ONNX Runtime Java API** inside `pymk-heavy-ranker`.

@@ -54,17 +54,19 @@ status differ.
 | Versioned multi-target exports, immutable dataset lineage and chronological validation | Implemented on Day 24; see `DAY24_DATASETS.md` |
 | Offline PyTorch two-head training, ONNX export and frozen-cohort comparisons | Implemented on Day 25; see `DAY25_HEAVY_TRAINING.md` |
 | Batched, release-compatible Java heavy scorer with two named probability heads | Implemented on Day 26; see `DAY26_HEAVY_SERVING.md` |
+| Frozen ONNX evaluation, raw calibration diagnostics, requester bootstrap and replay-context subgroup/stage analysis | Implemented on Day 27; see `DAY27_EVALUATION.md` |
 | Public L2 cutover and re-ranker | Planned for Days 28–30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 26 complete**. Target-only sections below use
+The current checkpoint is **Day 27 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
 The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
-datasets plus offline heavy-model training and an opt-in Java L2 scorer. Days 27–30 extend it;
+datasets plus offline heavy-model training, an opt-in Java L2 scorer and frozen
+offline evaluation. Days 28–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -366,7 +368,7 @@ partially generated list. This mutual-count value was the temporary public
 - `L1LightRanker` fails closed if a candidate is missing features, a batch mixes snapshots, or inference violates the output contract. It preserves L0 provenance and returns at most 500 candidates (configurable), ordered by positive-class probability with fusion score and candidate ID as deterministic tie-breakers.
 - **Implemented on Day 21:** the public orchestrator composes cached L0 → L1 and publishes the positive-class probability as `score`. Mutual counts flow from the same feature rows into explanations, avoiding a second ranking query. L1 or feature-store failures on cache misses return the existing retryable `503` contract without caching a failed or partial response. Redis keys use explicit L0/L1 pipeline and model versions.
 - **Day 21 hardening:** before reading either cache layer, the orchestrator checks that the configured cache model version matches the loaded model; mismatches return the same `503` contract. Invalid probabilities from any model implementation also use that serving contract. A full HTTP integration test exercises an actual exported ONNX model with PostgreSQL and Redis.
-- Public scores are positive-class outputs from a class-weighted classifier, not measured acceptance rates. Calibration remains an explicit Day 27 evaluation task; `[0,1]` bounds alone do not establish calibration.
+- Public scores are positive-class outputs from a class-weighted classifier, not measured acceptance rates. Day 27 reports raw calibration diagnostics without fitting a calibrator; `[0,1]` bounds alone do not establish calibration.
 
 ### Stage L2 — Heavy Ranker
 
@@ -388,6 +390,16 @@ inputs/results are scoped and model close is serialized against concurrent infer
 Spring loading is explicit opt-in; missing/invalid enabled artifacts fail startup.
 See `DAY26_HEAVY_SERVING.md`. Day 28 must pin the entire L0/L1/L2 request together
 and version cache semantics before exposing heavy scores publicly.
+**Day 27 evaluation implemented:** the immutable offline report compares both
+heavy heads, raw L1 acceptance and mutual-count ranking on identical frozen
+chronological cohorts. It reports AUC/AP, query-macro Precision/Recall@k, raw
+ECE/Brier and paired requester-cluster bootstrap intervals with explicit nulls
+for insufficient evidence. A checked replay context enables historical profile,
+degree/source cohorts and L0/L1 positive-loss accounting. Missing replay facts,
+full eligible-population recall and pre-export losses are not fabricated. A fixed
+policy gates offline evidence only; no calibration is fitted and no model is
+automatically promoted. See `DAY27_EVALUATION.md` for exact denominators and limits.
+
 **Goal:** precisely rank the few hundred remaining candidates. Evaluated by **AUC / Precision@k / ECE** (calibration matters because these scores feed the re-ranker).
 
 - Deep model (small feed-forward NN) trained offline in Python, exported to **ONNX**, served via **ONNX Runtime Java API** inside `pymk-heavy-ranker`.

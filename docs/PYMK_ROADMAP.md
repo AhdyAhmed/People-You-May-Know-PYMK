@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 26 complete; Day 27 is next. Target-architecture
+**Current checkpoint:** Day 27 complete; Day 28 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,7 +12,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–26 are the implementation record. Unchecked future days below
+Completed Days 1–27 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,10 +20,11 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–26 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–27 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
-Day 26 adds the opt-in Java heavy scorer. Days 27–30 build on those artifacts;
+Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
+Days 28–30 build on those artifacts;
 M7 later extends it to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
@@ -204,11 +205,14 @@ table and section 7.1 manifest contract when implementing those gates.
 - Implemented transactional release-pinned feature reads and one inference batch for every L1 survivor; no truncation, reordering or premature head blending. Strict metadata/native tensor contracts and managed-release transform checks fail closed. Default-disabled Spring wiring preserves the public L1 API until Day 28. See [Day 26 runbook](DAY26_HEAVY_SERVING.md) for configuration and reproducible checks; `-IncludeJavaHeavy` extends the fresh-training smoke with Java/Python parity and native lifecycle tests.
 - Verified 2026-10-04: full 12-module build, 146 Java tests and 34 Python tests passed with no test failures/errors/skips. Fresh-training Java parity, heavy-enabled API startup, HTTP/cache/rollback smoke, dependency checks and Compose configuration passed. This is a tested component milestone, not public L2 cutover or a calibration/performance claim.
 
-**Day 27 — Offline eval: AUC / Precision@k / ECE**
+**Day 27 — Offline eval: AUC / Precision@k / ECE ✅**
 - Script to evaluate the heavy ranker against the held-out time split; log AUC, Precision@k, ECE, and comparison with the mutual-connections baseline.
 - Evaluate the class-weighted L1 scores separately for calibration; use untouched chronological validation data for any calibration fitting and reserve test data for the final report. Do not claim measured acceptance rates before this evidence exists.
 - Define requester-grouped Recall@k/Precision@k denominators and coverage, include prevalence and unavailable single-class metrics, and distinguish full-pool recall from recall within L0 candidates. Compare every variant on the same frozen cohort and report uncertainty.
 - Include blank-profile, new-member, degree and candidate-source cohorts, positives lost at each stage, fixed candidate budgets and requester-bootstrap intervals. Set quality acceptance thresholds before viewing the final test comparison.
+- Implemented immutable, checksum/provenance-bound reports on the actual heavy/L1 ONNX models and identical frozen pair pools. Both targets include ranking metrics; probability models include raw ECE/Brier and reliability bins. Query denominators, single-class metrics, small-pool coverage and paired requester-bootstrap uncertainty are explicit. A versioned policy fixes thresholds/budgets; insufficient evidence blocks its offline quality gate, never changes serving.
+- Historical subgroup and L0/L1 loss analyses accept a strict hash-bound replay-context input. Existing v2 exports do not record those fields: without context they are reported unavailable and the gate cannot pass. Full eligible-population recall and pre-export losses remain unavailable, not approximated by exported-pool recall. No calibrator is fitted on checkpoint-selection validation/test data. The existing Day 25 fixture is not retroactively claimed as blind preregistered evidence. See [Day 27 runbook](DAY27_EVALUATION.md); use `-IncludeEvaluation` for the full smoke.
+- Verified 2026-10-04: all 12 Maven modules, 146 Java tests and 46 Python tests passed; dependency/Compose checks and fresh-training evaluation/Java parity/API/cache/rollback smoke passed. The small smoke cohort correctly fails the evidence quality gate without altering serving. Final evaluation includes the UTC-cutoff and float32 ECE-bin regression fixes; see the runbook's evidence record.
 
 **Day 28 — Wire L2 into orchestrator + buffer**
 - Integrate L0 → L1 → L2 with an explicit pipeline/cache version and configurable L1 rollback path. Serve complete results or the existing `503` contract; keep score semantics and OpenAPI/docs synchronized.

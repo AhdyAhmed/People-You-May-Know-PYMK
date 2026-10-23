@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation)
+if ($IncludeEvaluation) { $IncludeJavaHeavy = $true }
 if ($IncludeJavaHeavy) { $IncludeHeavy = $true }
 if ($IncludeHeavy) { $IncludeV2 = $true }
 $ErrorActionPreference = 'Stop'
@@ -94,6 +95,13 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     if ($IncludeHeavy) {
         Checked $Python @('-m','pymk_training.train_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--output-dir',"$output/heavy",'--model-version','heavy-mlp-v1','--embedding-transform',$transform,'--l1-model',$model,'--l1-metadata',$metadata)
         Write-Host 'PASS: Day 25 two-head PyTorch training, named ONNX parity and frozen-cohort comparisons'
+        if ($IncludeEvaluation) {
+            Checked $Python @('-m','pymk_training.evaluate_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--model',"$output/heavy/heavy-mlp-v1.onnx",'--metadata',"$output/heavy/heavy-mlp-v1.metadata.json",'--l1-model',$model,'--l1-metadata',$metadata,'--policy',"$root/pymk-ml-training/evaluation-policy.json",'--output',"$output/heavy/evaluation.json")
+            $evaluation = Get-Content "$output/heavy/evaluation.json" -Raw | ConvertFrom-Json
+            if ($evaluation.qualityGate.status -ne 'not_met' -or $evaluation.automaticPromotion) { throw 'Tiny smoke fixture must not qualify for model promotion' }
+            if ($evaluation.partitions.test.exportedPool.heavyAccepted.rows -le 0) { throw 'Missing held-out evaluation rows' }
+            Write-Host 'PASS: Day 27 frozen evaluation report; tiny cohort correctly fails the quality gate without changing serving'
+        }
         if ($IncludeJavaHeavy) {
             $fixture = "$output/heavy/java-fixture.json"
             & $Python -m pymk_training.heavy_serving_fixture --model "$output/heavy/heavy-mlp-v1.onnx" --metadata "$output/heavy/heavy-mlp-v1.metadata.json" > $fixture

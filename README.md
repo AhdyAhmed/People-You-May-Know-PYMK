@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 26 of 30 complete.** The M1 foundation and M2 baseline are
+> 🚧 **Status: Day 27 of 30 complete.** The M1 foundation and M2 baseline are
 > complete; the live M3 request path now runs L0 candidate generation → L1.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,11 +29,12 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 26 checkpoint, the
+The diagram is the end-state funnel. At the current Day 27 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
-implemented; public cutover and re-ranking are scheduled later in the roadmap.
+implemented, with frozen offline ranking/calibration evaluation. Public cutover
+and re-ranking are scheduled later in the roadmap.
 
 ```mermaid
 flowchart LR
@@ -410,7 +411,7 @@ for deterministic ties. `score` is that probability; mutual count remains a
 separate response field and explanation signal.
 
 These class-weighted model outputs have not yet been validated as calibrated
-acceptance rates; calibration is part of Day 27's held-out evaluation.
+acceptance rates. Day 27 reports raw calibration diagnostics; it does not fit a calibrator.
 
 The milestone section above contains the public request and response example.
 
@@ -594,6 +595,11 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       probability heads, release/feature compatibility checks, Python parity and
       safe resource cleanup. See the [serving runbook](docs/DAY26_HEAVY_SERVING.md).
       Public HTTP scoring remains L1 until Day 28.
+- [x] **Day 27 — Frozen offline evaluation**: both L2 heads, raw L1 and mutual-count
+      comparisons; AUC, query-grouped Precision/Recall@k, ECE/Brier, requester
+      bootstrap intervals and a fixed quality gate. Historical cohorts/stage losses
+      require checked replay context; missing evidence is explicit, never inferred.
+      See the [evaluation runbook](docs/DAY27_EVALUATION.md). No automatic promotion.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

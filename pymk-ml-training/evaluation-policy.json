@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "k": 10,
+  "l1Survivors": 200,
+  "eceBins": 10,
+  "bootstrapSamples": 500,
+  "seed": 42,
+  "minRequesters": 30,
+  "minPositives": 20,
+  "minAuc": 0.5,
+  "maxEce": 0.1,
+  "maxPrecisionRegression": 0.02,
+  "candidateBudgets": {"GRAPH_WALK": 2000, "HEURISTIC": 1000, "EMBEDDING": 1000}
+}

@@ -30,7 +30,14 @@ spring:
 
 pymk:
   serving:
+    # Explicit opt-in after evaluation; L1 is the safe rollback mode.
+    ranker: ${PYMK_SERVING_RANKER:L1}
     max-concurrent-requests: 2
+  heavy-ranker:
+    enabled: ${PYMK_L2_ENABLED:false}
+    model-path: ${PYMK_L2_MODEL_PATH:artifacts/models/heavy/heavy-mlp-v1.onnx}
+    metadata-path: ${PYMK_L2_METADATA_PATH:artifacts/models/heavy/heavy-mlp-v1.metadata.json}
+    max-candidates: 500
   cache:
     enabled: true
     key-prefix: pymk

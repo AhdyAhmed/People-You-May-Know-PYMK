@@ -6,8 +6,8 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 27 of 30 complete.** The M1 foundation and M2 baseline are
-> complete; the live M3 request path now runs L0 candidate generation → L1.
+> 🚧 **Status: Day 28 of 30 complete.** The API supports L0 → L1 → L2,
+> with explicit opt-in and an L1-only default/rollback path.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,12 +29,12 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 27 checkpoint, the
+The diagram is the end-state funnel. At the current Day 28 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
-implemented, with frozen offline ranking/calibration evaluation. Public cutover
-and re-ranking are scheduled later in the roadmap.
+implemented, with frozen offline ranking/calibration evaluation and configurable
+public L2 serving. Blending and re-ranking remain Days 29–30.
 
 ```mermaid
 flowchart LR
@@ -63,9 +63,9 @@ flowchart LR
 Full architecture, data model, API design, and offline evaluation strategy:
 [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md).
 
-## L0 → L1 pipeline is live
+## L0 → L1 → optional L2 pipeline is live
 
-The M2 application is runnable end to end. A recommendation request currently:
+The application is runnable end to end. A recommendation request currently:
 
 1. Fans out concurrently to the shared-profile, two/three-hop graph, and
    pgvector embedding candidate sources.
@@ -73,8 +73,14 @@ The M2 application is runnable end to end. A recommendation request currently:
 3. Merges source provenance with reciprocal-rank fusion.
 4. Batch-loads materialized pair features and scores the union in one ONNX
    inference call, ordered by connection probability.
-5. Caches the full L0 union and reusable top-100 result in Redis, then returns
+5. In explicit L2 mode, scores every L1 survivor with the heavy model and sorts by
+   acceptance probability, then candidate ID. L1 remains the default rollback mode.
+6. Caches the full L0 union and reusable top-100 result in Redis, then returns
    the requested 1–100 slice with human-readable reasons.
+
+`X-PYMK-Scorer` identifies the active score semantics. See the
+[Day 28 serving/rollback runbook](docs/DAY28_PUBLIC_L2.md) for activation,
+compatibility checks, versioned caches, failure behavior and latency evidence.
 
 After completing the Quickstart below, request three recommendations with:
 
@@ -238,7 +244,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M3 - Day 21: L0 to L1 pipeline live"}
+# {"service":"pymk-api","status":"up","milestone":"M4 - Day 28: configurable L0 to L1 to L2 pipeline","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -424,18 +430,23 @@ batch refresh; the endpoint requires complete, consistent feature coverage.
 ## Redis caching (Day 12)
 
 The orchestrator caches both the full L0 candidate union and the final top-100
-L1-ranked result. A request for any limit from 1 to 100 slices the same final
+L1- or L2-ranked result. A request for any limit from 1 to 100 slices the same final
 entry, avoiding one cache key per limit. Every key contains schema, pipeline,
 and model versions so a deployment can move to a new namespace without reading
-incompatible payloads.
+incompatible payloads. Day 28 also derives a scorer identity from mode/semantics,
+survivor budget and heavy model/metadata content, and pins a database source
+revision in the key. Managed releases retain their release ID and activation epoch.
 
-The configured `model-version` must match the loaded artifact's metadata before
-either cache layer can be read; a mismatch returns `503`. Publish new model
+The configured `model-version` must match the legacy L1 artifact's metadata;
+managed releases instead validate against the pinned database model version before
+either cache layer can be read. L2 also checks release compatibility on warm hits;
+a mismatch returns `503`. Publish new model
 bytes with a new version and update this configuration together. Null JSON,
 wrong-member responses, self/duplicate candidates, oversized final lists, and
-unordered final scores are evicted and recomputed. Feature refreshes do not
-currently invalidate these caches, so refreshed signals become visible after
-the configured TTL expires or an explicit eviction.
+unordered final scores are evicted and recomputed. Managed feature refreshes must
+publish a new release, which changes the namespace. Direct legacy feature-table
+refreshes still require explicit eviction/versioning or expiry; direct edits to
+immutable managed features are unsupported.
 
 Defaults can be overridden with Spring configuration:
 
@@ -600,6 +611,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       bootstrap intervals and a fixed quality gate. Historical cohorts/stage losses
       require checked replay context; missing evidence is explicit, never inferred.
       See the [evaluation runbook](docs/DAY27_EVALUATION.md). No automatic promotion.
+- [x] **Day 28 — Public L2 integration**: opt-in L0/L1/L2 serving, acceptance-head
+      ordering, safe L1 rollback, content/revision-isolated caches, complete-or-503
+      handling, real HTTP tests and cold/warm timing evidence. See the
+      [public L2 runbook](docs/DAY28_PUBLIC_L2.md). No automatic model promotion.
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

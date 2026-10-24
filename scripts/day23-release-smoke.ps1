@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving)
+if ($IncludeL2Serving) { $IncludeEvaluation = $true }
 if ($IncludeEvaluation) { $IncludeJavaHeavy = $true }
 if ($IncludeJavaHeavy) { $IncludeHeavy = $true }
 if ($IncludeHeavy) { $IncludeV2 = $true }
@@ -10,6 +11,29 @@ $pg = $null
 $redis = $null
 $api = $null
 $step = 0
+$apiBoot = 0
+function StartSmokeApi([string]$mode) {
+    if ($script:api -and -not $script:api.HasExited) {
+        Stop-Process -Id $script:api.Id
+        if (-not $script:api.WaitForExit(10000)) { throw 'Previous API process did not stop' }
+    }
+    $script:apiBoot++
+    $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
+    if ($mode -eq 'L2' -or ($IncludeJavaHeavy -and -not $IncludeL2Serving)) {
+        $apiArgs += @('--pymk.heavy-ranker.enabled=true',"--pymk.heavy-ranker.model-path=$output/heavy/heavy-mlp-v1.onnx","--pymk.heavy-ranker.metadata-path=$output/heavy/heavy-mlp-v1.metadata.json")
+    } else { $apiArgs += '--pymk.heavy-ranker.enabled=false' }
+    $quoted = $apiArgs | ForEach-Object { '"' + $_ + '"' }
+    $script:api = Start-Process java -ArgumentList $quoted -PassThru -WindowStyle Hidden -RedirectStandardOutput "$output/api-$apiBoot-$mode.log" -RedirectStandardError "$output/api-$apiBoot-$mode-error.log"
+    $ready = $false
+    for ($i = 0; $i -lt 90; $i++) {
+        if ($script:api.HasExited) { throw "API exited; inspect $output/api-$apiBoot-$mode.log" }
+        try { $health = Invoke-RestMethod "http://127.0.0.1:$port/actuator/health"; if ($health.status -eq 'UP') { $ready = $true; break } } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $ready) { throw 'API readiness timeout' }
+    $probe = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/pymk/1?limit=2"
+    if ($probe.Headers['X-PYMK-Scorer'] -ne $mode) { throw 'API scorer header disagrees with serving mode' }
+}
 function Checked([string]$exe, [string[]]$arguments) {
     & $exe @arguments
     if ($LASTEXITCODE -ne 0) { throw "$exe failed with exit code $LASTEXITCODE" }
@@ -117,22 +141,17 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     # Start from database-held model bytes, with deliberately nonexistent local model paths.
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
-    $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json")
-    if ($IncludeJavaHeavy) {
-        $apiArgs += @('--pymk.heavy-ranker.enabled=true',"--pymk.heavy-ranker.model-path=$output/heavy/heavy-mlp-v1.onnx","--pymk.heavy-ranker.metadata-path=$output/heavy/heavy-mlp-v1.metadata.json")
-    }
-    $quoted = $apiArgs | ForEach-Object { '"' + $_ + '"' }
-    $api = Start-Process java -ArgumentList $quoted -PassThru -WindowStyle Hidden -RedirectStandardOutput "$output/api.log" -RedirectStandardError "$output/api-error.log"
-    $ready = $false
-    for ($i = 0; $i -lt 90; $i++) {
-        if ($api.HasExited) { throw "API exited; inspect $output/api.log" }
-        try { $health = Invoke-RestMethod "http://127.0.0.1:$port/actuator/health"; if ($health.status -eq 'UP') { $ready = $true; break } } catch { }
-        Start-Sleep -Seconds 1
-    }
-    if (-not $ready) { throw 'API readiness timeout' }
+    if ($IncludeL2Serving) { StartSmokeApi 'L2' } else { StartSmokeApi 'L1' }
     $first = CheckResponse
     if ((CheckResponse) -ne $first) { throw 'Cached response mismatch' }
     Batch @('--spring.batch.job.name=servingReleaseJob','action=rollback','releaseId=legacy','expectedEpoch=1')
+    if ($IncludeL2Serving) {
+        $incompatible = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/pymk/1?limit=2" -SkipHttpErrorCheck
+        if ([int]$incompatible.StatusCode -ne 503) { throw 'L2 must reject the legacy release' }
+        StartSmokeApi 'L1'
+        $heavyFirst = $first
+        $first = CheckResponse
+    }
     CheckResponse | Out-Null
     Batch @('--spring.batch.job.name=servingReleaseJob','action=rollback','releaseId=release-3','expectedEpoch=2')
     if ((CheckResponse) -ne $first) { throw 'Rollback response mismatch' }
@@ -141,6 +160,11 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         if (-not ($keys -match [regex]::Escape($generation))) { throw "Missing cache namespace $generation" }
     }
     if ((Sql 'SELECT epoch FROM pymk_active_release') -ne '3') { throw 'Unexpected release epoch' }
+    if ($IncludeL2Serving) {
+        StartSmokeApi 'L2'
+        if ((CheckResponse) -ne $heavyFirst) { throw 'L2 re-enable changed the frozen release response' }
+        Write-Host 'PASS: Day 28 public L2 HTTP scoring, incompatible-release 503, L1-only process rollback and L2 re-enable with shared Redis'
+    }
     Write-Host "PASS: real training, activation, database-model startup, HTTP probabilities, caching and two rollbacks. Evidence: $output"
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id }

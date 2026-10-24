@@ -17,6 +17,8 @@ public interface HeavyRankerModel extends AutoCloseable {
                          Instant fitCutoff, Instant selectionCutoff) {}
     List<Probabilities> score(float[][] features);
     String modelVersion();
+    /** Content identity for public serving cache isolation; custom models must supply it. */
+    default String artifactIdentity() { throw new HeavyRankerException("L2 artifact identity is unavailable"); }
     Compatibility compatibility();
     @Override default void close() {}
 }

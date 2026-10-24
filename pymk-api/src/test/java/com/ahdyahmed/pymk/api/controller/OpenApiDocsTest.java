@@ -29,7 +29,9 @@ class OpenApiDocsTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("PYMK API"))
                 .andExpect(jsonPath("$.paths['/api/v1/members/{id}'].get").exists())
-                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get.responses['200'].headers['X-PYMK-Scorer']").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get.description").value(org.hamcrest.Matchers.containsString("L2")));
     }
 
     @Test

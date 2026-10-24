@@ -28,6 +28,29 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class RecommendationOrchestratorTest {
+    @Test
+    void l2ScoresAllSurvivorsBeforeLimitingAndUsesAcceptedHeadWithIdTies() {
+        var heavy = mock(com.ahdyahmed.pymk.heavyranker.L2HeavyRanker.class);
+        var model = mock(com.ahdyahmed.pymk.heavyranker.HeavyRankerModel.class);
+        when(model.artifactIdentity()).thenReturn("a".repeat(64));
+        var pipeline = new ServingPipeline("L2",heavy,model,500,500);
+        org.springframework.test.util.ReflectionTestUtils.setField(orchestrator,"pipeline",pipeline);
+        when(members.existsById(42L)).thenReturn(true);
+        var candidates = List.of(candidate(103,.3,CandidateSourceType.EMBEDDING,Map.of()),candidate(101,.2,CandidateSourceType.EMBEDDING,Map.of()),candidate(102,.1,CandidateSourceType.EMBEDDING,Map.of()));
+        var survivors = candidates.stream().map(c -> ranked(c,.5,0)).toList();
+        when(generator.generate(42L)).thenReturn(candidates);
+        when(lightRanker.rank(42L,candidates)).thenReturn(survivors);
+        when(heavy.score(42L,survivors)).thenReturn(survivors.stream().map(row ->
+                new com.ahdyahmed.pymk.heavyranker.HeavyScoredCandidate(row,
+                        new com.ahdyahmed.pymk.heavyranker.HeavyRankerModel.Probabilities(row.candidateId()==103 ? .99f : .01f,.7f),"release",1,"heavy")).toList());
+        var result = orchestrator.getRecommendations(42,1).orElseThrow();
+        assertThat(result.recommendations()).extracting(Recommendation::candidateId).containsExactly(101L);
+        verify(heavy).score(42L,survivors);
+        verify(cache).putResult(org.mockito.ArgumentMatchers.eq(42L),org.mockito.ArgumentMatchers.argThat(r -> r.recommendations().size()==3));
+        doThrow(new com.ahdyahmed.pymk.heavyranker.HeavyRankerException("bad output")).when(heavy).score(42L,survivors);
+        assertThatThrownBy(() -> orchestrator.getRecommendations(42,1)).isInstanceOf(RecommendationGenerationException.class);
+        verify(cache,org.mockito.Mockito.times(1)).putResult(anyLong(),org.mockito.ArgumentMatchers.any());
+    }
 
     private L0CandidateGenerator generator;
     private L1LightRanker lightRanker;

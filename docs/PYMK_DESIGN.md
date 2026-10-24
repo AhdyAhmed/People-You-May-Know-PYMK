@@ -55,18 +55,19 @@ status differ.
 | Offline PyTorch two-head training, ONNX export and frozen-cohort comparisons | Implemented on Day 25; see `DAY25_HEAVY_TRAINING.md` |
 | Batched, release-compatible Java heavy scorer with two named probability heads | Implemented on Day 26; see `DAY26_HEAVY_SERVING.md` |
 | Frozen ONNX evaluation, raw calibration diagnostics, requester bootstrap and replay-context subgroup/stage analysis | Implemented on Day 27; see `DAY27_EVALUATION.md` |
-| Public L2 cutover and re-ranker | Planned for Days 28–30 |
+| Configurable public L2 serving, L1 rollback, content/revision cache isolation and stage timers | Implemented on Day 28; see `DAY28_PUBLIC_L2.md` |
+| Blending and re-ranker | Planned for Days 29–30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 27 complete**. Target-only sections below use
+The current checkpoint is **Day 28 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
-The runnable checkpoint is the public L0 → L1 pipeline plus offline profile
+The runnable checkpoint is the public L0 → L1 pipeline with explicit optional L2, plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
 datasets plus offline heavy-model training, an opt-in Java L2 scorer and frozen
-offline evaluation. Days 28–30 extend it;
+offline evaluation and safe process-level L1 rollback. Days 29–30 extend it;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -378,8 +379,8 @@ ONNX/metadata export. The scaler and trained weights are serialized with standar
 ONNX operators; runtime parity checks cover empty/single/multi-row batches before
 publication. Frozen L1 and mutual-count comparisons use identical cohorts and
 chronological partitions. See [the training runbook](DAY25_HEAVY_TRAINING.md).
-The API still uses L1; Java L2 scoring is implemented on Day 26 and public cutover
-remains Day 28. `L2HeavyRanker` pins a managed release in a read transaction,
+The API defaults to L1; Day 28 implements explicit public L2 mode without automatic
+promotion. `L2HeavyRanker` pins a managed release in a read transaction,
 validates embedding version/transform hash/fit cutoff and model selection cutoff,
 loads all survivor features in one query, then runs one dynamic ONNX batch.
 It returns both named probabilities in L1 order with release epoch/model provenance;
@@ -388,8 +389,11 @@ Artifact loading validates SHA-256, ordered features, named dynamic float32 tens
 and output semantics. Inference validates finite probabilities in [0,1]; native
 inputs/results are scoped and model close is serialized against concurrent inference.
 Spring loading is explicit opt-in; missing/invalid enabled artifacts fail startup.
-See `DAY26_HEAVY_SERVING.md`. Day 28 must pin the entire L0/L1/L2 request together
-and version cache semantics before exposing heavy scores publicly.
+Day 28 pins the entire L0/L1/L2 request together. Public L2 `score` is the acceptance
+head, ordered descending with candidate-ID ties; blending remains Day 29. The mode
+is exposed in `X-PYMK-Scorer`. Incompatible release/model/features fail `503`, even
+on warm cache lookups; no automatic L1 fallback occurs. L1 rollback is an explicit
+process restart and can disable all heavy artifact loading. See `DAY28_PUBLIC_L2.md`.
 **Day 27 evaluation implemented:** the immutable offline report compares both
 heavy heads, raw L1 acceptance and mutual-count ranking on identical frozen
 chronological cohorts. It reports AUC/AP, query-macro Precision/Recall@k, raw
@@ -417,14 +421,14 @@ registry, mandatory CSV/cohort/source/embedding provenance and strict Python
 chronological validation. See [the dataset runbook](DAY24_DATASETS.md) for commands,
 late-label correction identities and the event-time/knowledge-time boundary.
 
-The serving artifact will declare ordered features, their schema and embedding
+The serving artifact declares ordered features, their schema and embedding
 versions, named outputs, target definitions, tensor dimensions, and a checksum.
 Scale transforms are fitted only on training data and exported with the model.
-Before Day 28 cutover, Java/Python parity tests must cover actual batched
+Day 26–28 Java/Python parity and serving tests cover actual batched
 inference, both output heads, empty input, missing features, invalid probabilities,
-and incompatible artifacts. Preserve the deployed L1 path as a configurable
-rollback option and give L2 a separate pipeline/cache namespace. The selected
-path must return a complete result or the established `503` contract.
+and incompatible artifacts. The deployed L1 path remains a configurable
+rollback option and L2 has a separate pipeline/cache namespace. The selected
+path returns a complete result or the established `503` contract.
 
 ### Stage Re-Ranker
 **Goal:** final blending + exposure-diversity constraints, producing the top-N (e.g. 20) shown to the user.
@@ -452,7 +456,7 @@ propensity logs, the objective is a declared offline ranking proxy, not an
 estimate of causal engagement lift. Record the objective, seed, search budget,
 selected weights, and baseline comparison so the experiment can be reproduced.
 
-### Target orchestration flow (L2 and re-ranking planned)
+### Target orchestration flow (L2 implemented; blending/re-ranking planned)
 
 ```mermaid
 sequenceDiagram
@@ -494,11 +498,14 @@ sequenceDiagram
 - The Python L1 publisher now refuses an existing model or metadata path and uses exclusive atomic publication of each completed file. Metadata is published after the ONNX file. They are not one filesystem transaction: an interrupted pair is inactive, reserves that version, and requires a new version for a fresh L1 training attempt. Java still validates both files and their checksum before loading.
 - Final results and L0 candidates can remain stale within their TTL after feature refreshes. A graph mutation may introduce candidates whose features have not yet been materialized; those requests return `503` until a successful refresh covers the complete live candidate batch. This is the current Day 21 availability boundary.
 
-Delete-on-mutation plus TTL is eventual consistency: an in-flight request can
-repopulate an old result after invalidation. M8 must exercise that race and use
-a graph/release revision or equivalent write fencing before claiming immediate
-cache coherence. Day 23 release cache keys include the serving release ID and activation epoch,
-so an old request cannot populate the newly activated release's namespace.
+Day 28 augments release ID/epoch cache namespaces with an immutable scorer identity
+(mode/score semantics, L1 budget and heavy model+metadata digest) and the database
+source revision pinned at request entry. In-flight old requests can populate only
+their old revision; switching back to L1 cannot reuse results preceding source
+mutations made in L2 mode. The global revision invalidates broadly and adds a DB
+read per request; old entries expire by TTL. This does not claim serializable graph
+responses for writes concurrent with a request, nor permit edits to immutable
+release feature/model rows. M8 must evaluate throughput and finer-grained fencing.
 
 ---
 
@@ -867,7 +874,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 1. **M1 — Core domain and API foundation**: entities, Postgres schema, seed data generator, member lookup, connection mutation, OpenAPI, error contract, and local runbook. **Complete through Day 7.**
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
 3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, contract-validated batched Java serving, and the public L0 → L1 cutover are **complete through Day 21**.
-4. **M4 — L2 heavy ranker**: train offline model, export ONNX, serve via `pymk-heavy-ranker`.
+4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
 5. **M5 — Re-ranker**: blending + exposure diversification.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.
 7. **M7 — Batch operations**: scheduling, restartability, idempotency, reconciliation, and remaining production-style batch jobs.

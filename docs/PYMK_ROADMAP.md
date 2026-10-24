@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 27 complete; Day 28 is next. Target-architecture
+**Current checkpoint:** Day 28 complete; Day 29 is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,7 +12,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–27 are the implementation record. Unchecked future days below
+Completed Days 1–28 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,11 +20,11 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–27 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–28 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
-Days 28–30 build on those artifacts;
+Day 28 adds explicit public L2 serving with an L1 rollback path. Days 29–30 build on those artifacts;
 M7 later extends it to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
@@ -214,9 +214,11 @@ table and section 7.1 manifest contract when implementing those gates.
 - Historical subgroup and L0/L1 loss analyses accept a strict hash-bound replay-context input. Existing v2 exports do not record those fields: without context they are reported unavailable and the gate cannot pass. Full eligible-population recall and pre-export losses remain unavailable, not approximated by exported-pool recall. No calibrator is fitted on checkpoint-selection validation/test data. The existing Day 25 fixture is not retroactively claimed as blind preregistered evidence. See [Day 27 runbook](DAY27_EVALUATION.md); use `-IncludeEvaluation` for the full smoke.
 - Verified 2026-10-04: all 12 Maven modules, 146 Java tests and 46 Python tests passed; dependency/Compose checks and fresh-training evaluation/Java parity/API/cache/rollback smoke passed. The small smoke cohort correctly fails the evidence quality gate without altering serving. Final evaluation includes the UTC-cutoff and float32 ECE-bin regression fixes; see the runbook's evidence record.
 
-**Day 28 — Wire L2 into orchestrator + buffer**
+**Day 28 — Wire L2 into orchestrator + buffer ✅**
 - Integrate L0 → L1 → L2 with an explicit pipeline/cache version and configurable L1 rollback path. Serve complete results or the existing `503` contract; keep score semantics and OpenAPI/docs synchronized.
 - Verify live HTTP requests, eligibility, deterministic ties, cache invalidation, rollback, and dependency/model failure cases. Measure per-stage and end-to-end cold/warm p50/p95/p99 with stated data size, hardware, concurrency, and request mix.
+- Implemented explicit process-level L1/L2 modes, one pinned request across all stages, heavy acceptance-head ordering (candidate-ID ties), reusable top-100 results, warm-hit compatibility validation and no silent fallback. Derived artifact/semantics/budget and pinned source-revision cache namespaces prevent cross-mode reuse after source changes. Status/OpenAPI identify score semantics. Micrometer stage timers and the real HTTP test provide a bounded cold/warm latency report; the tiny fixture is not a production SLO claim. See [Day 28 runbook](DAY28_PUBLIC_L2.md); `-IncludeL2Serving` exercises packaged-process rollback and re-enable with shared Redis.
+- Verified 2026-10-04: all 12 Maven modules, 154 Java tests and 46 Python tests passed; fresh packaged L2 → L1-only rollback → L2 smoke with shared Redis, release rollback, model parity, dependency and Compose checks passed. The four-member, concurrency-one diagnostic measured cold/warm HTTP p99 of 171.34/35.96 ms; the 150 ms end-to-end target is not established, and no production-quality promotion is claimed.
 
 ---
 

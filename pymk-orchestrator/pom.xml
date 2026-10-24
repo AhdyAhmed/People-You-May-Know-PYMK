@@ -19,6 +19,14 @@
   <dependencies>
     <dependency>
       <groupId>com.ahdyahmed.pymk</groupId>
+      <artifactId>pymk-heavy-ranker</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.ahdyahmed.pymk</groupId>
       <artifactId>pymk-common</artifactId>
     </dependency>
     <dependency>

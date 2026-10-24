@@ -27,6 +27,31 @@ public class L2HeavyRanker {
     }
 
     @Transactional(readOnly = true)
+    public void verifyRelease() {
+        try (var pin = releases.pin()) { validatePinnedRelease(releases.current()); }
+        catch (DataAccessException ex) { throw new HeavyRankerException("L2 release read failed", ex); }
+    }
+
+    private java.time.Instant validatePinnedRelease(ServingReleaseStore.ActiveRelease release) {
+        if (!release.managed()) throw new HeavyRankerException("L2 requires a managed profile-embedding release");
+        var context = jdbc.queryForMap("""
+                SELECT r.feature_as_of, r.embedding_version, t.transform_sha256, t.fit_cutoff
+                FROM pymk_serving_releases r JOIN pymk_embedding_transforms t USING (embedding_version)
+                WHERE r.release_id=? AND r.state='READY'
+                """, release.id());
+        var snapshot = ((Timestamp) context.get("feature_as_of")).toInstant();
+        var contract = model.compatibility();
+        if (contract == null || !"pair-v1".equals(contract.featureSchema())
+                || !Objects.equals(context.get("embedding_version"), contract.embeddingVersion())
+                || !Objects.equals(context.get("transform_sha256"), contract.transformSha256())
+                || !((Timestamp) context.get("fit_cutoff")).toInstant().equals(contract.fitCutoff())
+                || contract.selectionCutoff() == null || contract.selectionCutoff().isAfter(snapshot)) {
+            throw new HeavyRankerException("L2 model is incompatible with the pinned embedding/feature release");
+        }
+        return snapshot;
+    }
+
+    @Transactional(readOnly = true)
     public List<HeavyScoredCandidate> score(long memberId, List<LightRankedCandidate> survivors) {
         if (memberId <= 0) throw new IllegalArgumentException("memberId must be positive");
         Objects.requireNonNull(survivors, "survivors");
@@ -41,21 +66,7 @@ public class L2HeavyRanker {
         }
         try (var pin = releases.pin()) {
             var release = releases.current();
-            if (!release.managed()) throw new HeavyRankerException("L2 requires a managed profile-embedding release");
-            var context = jdbc.queryForMap("""
-                    SELECT r.feature_as_of, r.embedding_version, t.transform_sha256, t.fit_cutoff
-                    FROM pymk_serving_releases r JOIN pymk_embedding_transforms t USING (embedding_version)
-                    WHERE r.release_id=? AND r.state='READY'
-                    """, release.id());
-            var snapshot = ((Timestamp) context.get("feature_as_of")).toInstant();
-            var contract = model.compatibility();
-            if (contract == null || !"pair-v1".equals(contract.featureSchema())
-                    || !Objects.equals(context.get("embedding_version"), contract.embeddingVersion())
-                    || !Objects.equals(context.get("transform_sha256"), contract.transformSha256())
-                    || !((Timestamp) context.get("fit_cutoff")).toInstant().equals(contract.fitCutoff())
-                    || contract.selectionCutoff() == null || contract.selectionCutoff().isAfter(snapshot)) {
-                throw new HeavyRankerException("L2 model is incompatible with the pinned embedding/feature release");
-            }
+            var snapshot = validatePinnedRelease(release);
             for (var survivor : survivors) {
                 if (!snapshot.equals(survivor.featureAsOf()) || !Objects.equals(release.modelVersion(), survivor.modelVersion())) {
                     throw new HeavyRankerException("L1 survivors do not belong to the pinned release snapshot/model");

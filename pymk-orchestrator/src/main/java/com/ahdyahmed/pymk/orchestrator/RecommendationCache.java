@@ -26,6 +26,18 @@ public class RecommendationCache {
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.ahdyahmed.pymk.domain.service.ServingReleaseStore releases;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ServingPipeline pipeline;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final ThreadLocal<Long> sourceRevision = new ThreadLocal<>();
+
+    /** A request keeps one cache generation even if a source mutation commits mid-flight. */
+    public com.ahdyahmed.pymk.domain.service.ServingReleaseStore.Scope pinNamespace() {
+        Long previous = sourceRevision.get();
+        if (jdbc != null) sourceRevision.set(jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class));
+        return () -> { if (previous == null) sourceRevision.remove(); else sourceRevision.set(previous); };
+    }
 
     private static final Logger log = LoggerFactory.getLogger(RecommendationCache.class);
     private static final TypeReference<List<MergedCandidate>> CANDIDATE_LIST = new TypeReference<>() { };
@@ -141,6 +153,12 @@ public class RecommendationCache {
                 "model", properties.getModelVersion(),
                 layer, Long.toString(memberId));
         var selected = releases == null ? null : releases.current();
+        if (pipeline != null) key += ":scorer:" + pipeline.identity();
+        if (jdbc != null) {
+            Long revision = sourceRevision.get();
+            if (revision == null) revision = jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class);
+            key += ":source:" + revision;
+        }
         return selected == null || selected.epoch() == 0 ? key : key + ":release:" + selected.namespace();
     }
 

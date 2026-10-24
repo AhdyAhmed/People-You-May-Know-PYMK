@@ -60,9 +60,9 @@ class RecommendationCacheIntegrationTest {
         assertThat(cache.getCandidates(MEMBER_ID)).contains(candidates);
         assertThat(cache.getResult(MEMBER_ID)).contains(result);
         assertThat(cache.candidateKey(MEMBER_ID))
-                .isEqualTo("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:l0:920001");
+                .startsWith("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:l0:920001:scorer:day28-l1-v1-500:source:");
         assertThat(cache.resultKey(MEMBER_ID))
-                .isEqualTo("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:result:920001");
+                .startsWith("pymk:schema:v1:pipeline:l0-l1-v1:model:light-logreg-v1:result:920001:scorer:day28-l1-v1-500:source:");
         assertThat(redis.getExpire(cache.candidateKey(MEMBER_ID), TimeUnit.MILLISECONDS)).isPositive();
         assertThat(redis.getExpire(cache.resultKey(MEMBER_ID), TimeUnit.MILLISECONDS)).isPositive();
     }

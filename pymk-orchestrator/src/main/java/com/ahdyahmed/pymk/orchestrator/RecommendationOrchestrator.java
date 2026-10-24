@@ -9,15 +9,34 @@ import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.lightranker.L1LightRanker;
 import com.ahdyahmed.pymk.lightranker.LightRankedCandidate;
 import com.ahdyahmed.pymk.lightranker.LightRankerException;
+import com.ahdyahmed.pymk.heavyranker.HeavyRankerException;
+import com.ahdyahmed.pymk.heavyranker.HeavyScoredCandidate;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-/** Online pipeline composition: cached L0 generation followed by the Day 20 L1 ranker. */
+/** Release-pinned L0/L1 pipeline with explicit Day 28 heavy serving and L1 rollback. */
 @Service
 public class RecommendationOrchestrator {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ServingPipeline pipeline;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private io.micrometer.core.instrument.MeterRegistry metrics;
+
+    private <T> T timed(String stage, java.util.function.Supplier<T> action) {
+        long start = System.nanoTime();
+        boolean success = false;
+        try { T value = action.get(); success = true; return value; }
+        finally {
+            if (metrics != null) io.micrometer.core.instrument.Timer.builder("pymk.pipeline.stage")
+                    .tag("stage", stage).tag("mode", pipeline == null ? "L1" : pipeline.mode())
+                    .tag("outcome", success ? "success" : "failure")
+                    .publishPercentiles(.5, .95, .99).register(metrics)
+                    .record(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.ahdyahmed.pymk.domain.service.ServingReleaseStore releases;
@@ -65,6 +84,10 @@ public class RecommendationOrchestrator {
      * A pipeline failure never masquerades as an empty recommendation list.
      */
     public Optional<RecommendationResult> getRecommendations(long memberId, int limit) {
+        return timed("request", () -> getRecommendationsInTransaction(memberId, limit));
+    }
+
+    private Optional<RecommendationResult> getRecommendationsInTransaction(long memberId, int limit) {
         if (releaseTransaction == null) return getConsistentRecommendations(memberId, limit);
         boolean acquired = false;
         try {
@@ -80,7 +103,7 @@ public class RecommendationOrchestrator {
     }
 
     private Optional<RecommendationResult> getConsistentRecommendations(long memberId, int limit) {
-        try (var scope = releases == null ? null : releases.pin()) {
+        try (var scope = releases == null ? null : releases.pin(); var namespace = cache.pinNamespace()) {
             if (releases != null) {
                 try {
                     releases.verifyCandidateBudgets(candidateProperties.sourceLimit(CandidateSourceType.GRAPH_WALK),
@@ -106,7 +129,8 @@ public class RecommendationOrchestrator {
 
         try {
             cache.verifyModelVersion(lightRanker.modelVersion());
-        } catch (LightRankerException ex) {
+            if (pipeline != null && pipeline.usesHeavyRanker()) pipeline.heavyRanker().verifyRelease();
+        } catch (LightRankerException | HeavyRankerException ex) {
             throw new RecommendationGenerationException("L1 model and cache configuration disagree", ex);
         }
 
@@ -121,7 +145,7 @@ public class RecommendationOrchestrator {
             candidates = cachedCandidates.orElseThrow();
         } else {
             try {
-                candidates = candidateGenerator.generate(memberId);
+                candidates = timed("l0", () -> candidateGenerator.generate(memberId));
                 cache.putCandidates(memberId, candidates);
             } catch (CandidateGenerationException ex) {
                 throw new RecommendationGenerationException(
@@ -137,16 +161,33 @@ public class RecommendationOrchestrator {
 
         final List<LightRankedCandidate> ranked;
         try {
-            ranked = lightRanker.rank(memberId, candidates);
+            ranked = timed("l1", () -> lightRanker.rank(memberId, candidates));
         } catch (LightRankerException | DataAccessException ex) {
             throw new RecommendationGenerationException(
                     "Unable to rank complete recommendations for member " + memberId, ex);
         }
 
-        List<Recommendation> recommendations = ranked.stream()
-                .limit(MAX_RESULTS)
-                .map(RecommendationOrchestrator::toRecommendation)
-                .toList();
+        final List<Recommendation> recommendations;
+        if (pipeline != null && pipeline.usesHeavyRanker()) {
+            try {
+                var heavy = timed("l2", () -> pipeline.heavyRanker().score(memberId, ranked));
+                if (heavy == null || heavy.size() != ranked.size()) throw new HeavyRankerException("Incomplete L2 batch");
+                for (int i = 0; i < ranked.size(); i++) {
+                    if (heavy.get(i) == null || !heavy.get(i).l1().equals(ranked.get(i))) throw new HeavyRankerException("L2 changed survivor membership/order");
+                }
+                recommendations = heavy.stream()
+                        .sorted(java.util.Comparator.comparingDouble((HeavyScoredCandidate row) -> row.probabilities().inviteAccepted()).reversed()
+                                .thenComparingLong(HeavyScoredCandidate::candidateId))
+                        .limit(MAX_RESULTS)
+                        .map(row -> new Recommendation(row.candidateId(), row.probabilities().inviteAccepted(),
+                                row.l1().mutualConnectionCount(), reasons(row.l1().candidate().sourceHits(), row.l1().mutualConnectionCount())))
+                        .toList();
+            } catch (HeavyRankerException | DataAccessException ex) {
+                throw new RecommendationGenerationException("Unable to score complete L2 recommendations for member " + memberId, ex);
+            }
+        } else {
+            recommendations = ranked.stream().limit(MAX_RESULTS).map(RecommendationOrchestrator::toRecommendation).toList();
+        }
         RecommendationResult fullResult = new RecommendationResult(memberId, recommendations);
         cache.putResult(memberId, fullResult);
         return Optional.of(limit(fullResult, limit));

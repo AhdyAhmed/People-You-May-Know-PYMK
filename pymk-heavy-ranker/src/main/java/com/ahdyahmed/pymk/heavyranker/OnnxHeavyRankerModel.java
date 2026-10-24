@@ -20,6 +20,7 @@ public final class OnnxHeavyRankerModel implements HeavyRankerModel {
     private final Compatibility compatibility;
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private boolean closed;
+    private String artifactIdentity;
 
     private OnnxHeavyRankerModel(OrtEnvironment environment, OrtSession session, String version, Compatibility compatibility) {
         this.environment = environment; this.session = session; this.version = version; this.compatibility = compatibility;
@@ -47,6 +48,10 @@ public final class OnnxHeavyRankerModel implements HeavyRankerModel {
             require(outputs.keySet().equals(new HashSet<>(OUTPUTS)), "ONNX output names");
             for (String output : OUTPUTS) requireTensor(outputs.get(output), 1);
             var model = new OnnxHeavyRankerModel(environment, session, metadata.path("modelVersion").asText(), compatibility);
+            var digest = MessageDigest.getInstance("SHA-256");
+            digest.update(bytes);
+            digest.update(metadata.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            model.artifactIdentity = HexFormat.of().formatHex(digest.digest());
             model.score(new float[][]{new float[6]}); // Detect bad output values before accepting work.
             return model;
         } catch (Exception ex) {
@@ -134,6 +139,7 @@ public final class OnnxHeavyRankerModel implements HeavyRankerModel {
     }
 
     @Override public String modelVersion() { return version; }
+    @Override public String artifactIdentity() { return artifactIdentity; }
     @Override public Compatibility compatibility() { return compatibility; }
     @Override public void close() {
         lifecycle.writeLock().lock();

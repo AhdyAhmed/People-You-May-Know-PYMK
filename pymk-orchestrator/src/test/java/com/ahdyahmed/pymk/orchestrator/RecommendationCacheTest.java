@@ -20,6 +20,27 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 class RecommendationCacheTest {
+    @Test
+    void modeArtifactAndSourceRevisionIsolateCachesAndRevisionIsPinned() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        when(jdbc.queryForObject("SELECT revision FROM pymk_source_revision",Long.class)).thenReturn(1L);
+        org.springframework.test.util.ReflectionTestUtils.setField(cache,"jdbc",jdbc);
+        org.springframework.test.util.ReflectionTestUtils.setField(cache,"pipeline",new ServingPipeline("L1",null,null,500,500));
+        String l1 = cache.resultKey(42);
+        var heavy = mock(com.ahdyahmed.pymk.heavyranker.L2HeavyRanker.class);
+        var model = mock(com.ahdyahmed.pymk.heavyranker.HeavyRankerModel.class);
+        when(model.artifactIdentity()).thenReturn("a".repeat(64));
+        org.springframework.test.util.ReflectionTestUtils.setField(cache,"pipeline",new ServingPipeline("L2",heavy,model,500,500));
+        String l2 = cache.resultKey(42);
+        assertThat(l2).isNotEqualTo(l1);
+        try (var scope = cache.pinNamespace()) {
+            when(jdbc.queryForObject("SELECT revision FROM pymk_source_revision",Long.class)).thenReturn(2L);
+            assertThat(cache.resultKey(42)).isEqualTo(l2);
+        }
+        assertThat(cache.resultKey(42)).isNotEqualTo(l2);
+        org.springframework.test.util.ReflectionTestUtils.setField(cache,"pipeline",new ServingPipeline("L1",null,null,500,500));
+        assertThat(cache.resultKey(42)).isNotEqualTo(l1);
+    }
 
     private StringRedisTemplate redis;
     private ValueOperations<String, String> values;

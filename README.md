@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 28 of 30 complete.** The API supports L0 → L1 → L2,
+> 🚧 **Status: Day 29 of 30 complete.** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -29,12 +29,13 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 28 checkpoint, the
+The diagram is the end-state funnel. At the current Day 29 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
 implemented, with frozen offline ranking/calibration evaluation and configurable
-public L2 serving. Blending and re-ranking remain Days 29–30.
+public L2 serving, normalized blending and employer exposure selection.
+Offline blend-weight tuning remains Day 30.
 
 ```mermaid
 flowchart LR
@@ -63,7 +64,7 @@ flowchart LR
 Full architecture, data model, API design, and offline evaluation strategy:
 [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md).
 
-## L0 → L1 → optional L2 pipeline is live
+## L0 → L1 → optional L2 and re-ranking pipeline is live
 
 The application is runnable end to end. A recommendation request currently:
 
@@ -74,13 +75,20 @@ The application is runnable end to end. A recommendation request currently:
 4. Batch-loads materialized pair features and scores the union in one ONNX
    inference call, ordered by connection probability.
 5. In explicit L2 mode, scores every L1 survivor with the heavy model and sorts by
-   acceptance probability, then candidate ID. L1 remains the default rollback mode.
-6. Caches the full L0 union and reusable top-100 result in Redis, then returns
-   the requested 1–100 slice with human-readable reasons.
+   acceptance probability, then candidate ID. RERANK mode instead blends both
+   heads and applies a request-size-specific employer exposure cap. L1 remains
+   the default rollback mode.
+6. Caches the full L0 union and either a reusable L1/L2 top-100 result or the
+   entire RERANK scored pool before selection. Returns up to the requested 1–100
+   results with reasons; RERANK also reports realized employer exposure.
 
 `X-PYMK-Scorer` identifies the active score semantics. See the
 [Day 28 serving/rollback runbook](docs/DAY28_PUBLIC_L2.md) for activation,
 compatibility checks, versioned caches, failure behavior and latency evidence.
+The [Day 29 blend/diversity runbook](docs/DAY29_BLEND_DIVERSITY.md) documents
+`PYMK_SERVING_RANKER=RERANK`, normalized weight/cap configuration, underfilled
+responses, scored-pool caching and rollback. Default blend weights are not tuned;
+Bayesian validation-only weight search remains Day 30.
 
 After completing the Quickstart below, request three recommendations with:
 
@@ -244,7 +252,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M4 - Day 28: configurable L0 to L1 to L2 pipeline","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M5 - Day 29: weighted blend and employer exposure selection","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -437,6 +445,12 @@ incompatible payloads. Day 28 also derives a scorer identity from mode/semantics
 survivor budget and heavy model/metadata content, and pins a database source
 revision in the key. Managed releases retain their release ID and activation epoch.
 
+RERANK uses a separate pre-selection scored-pool cache containing every L1
+survivor, including employer groups. Each request reapplies its own limit's cap;
+do not cache one diversified page and slice it for other limits. Its derived
+identity also includes normalized weights and employer-cap policy. Profile and
+connection mutations advance the source revision, fencing old groups/eligibility.
+
 The configured `model-version` must match the legacy L1 artifact's metadata;
 managed releases instead validate against the pinned database model version before
 either cache layer can be read. L2 also checks release compatibility on warm hits;
@@ -615,6 +629,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       ordering, safe L1 rollback, content/revision-isolated caches, complete-or-503
       handling, real HTTP tests and cold/warm timing evidence. See the
       [public L2 runbook](docs/DAY28_PUBLIC_L2.md). No automatic model promotion.
+- [x] **Day 29 — Blend and exposure selection**: opt-in RERANK mode, validated
+      normalized weights, deterministic employer caps, full pre-selection pool
+      caching, request-specific exposure reports, and real HTTP regression tests.
+      See the [blend/diversity runbook](docs/DAY29_BLEND_DIVERSITY.md).
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

@@ -1,5 +1,10 @@
 # Day 28 — public L2 pipeline and rollback
 
+This records the Day 28 checkpoint and its L1/L2 semantics. Day 29 adds a separate
+opt-in RERANK mode and updates the status milestone; see
+[blend/diversity serving](DAY29_BLEND_DIVERSITY.md). L1/L2 rollback behavior below
+remains available unchanged.
+
 The application can now serve **L0 → L1 → L2** at `GET /api/v1/pymk/{memberId}`.
 L1 remains the default and explicit rollback mode. This is not automatic model
 promotion: the Day 27 synthetic evaluation is insufficient evidence to choose L2

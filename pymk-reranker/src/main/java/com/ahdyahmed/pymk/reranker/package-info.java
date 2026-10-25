@@ -1,8 +1,7 @@
 /**
- * Fairness/diversity re-ranking and Bayesian-tuned score blending.
+ * Deterministic employer exposure selection and validated two-head score blending.
  *
- * <p>Deliberately empty on Day 1 - this module exists so the multi-module
- * build wiring, dependency graph, and package layout are correct before any
- * real logic lands (see PYMK_ROADMAP.md, Week 1).</p>
+ * <p>Day 29 provides the immutable online policy; offline weight tuning is Day 30.
+ * Employer exposure diversity is not a protected-attribute fairness guarantee.</p>
  */
 package com.ahdyahmed.pymk.reranker;

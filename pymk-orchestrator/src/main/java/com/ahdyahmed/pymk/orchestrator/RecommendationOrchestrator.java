@@ -17,7 +17,7 @@ import java.util.Optional;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-/** Release-pinned L0/L1 pipeline with explicit Day 28 heavy serving and L1 rollback. */
+/** Release-pinned L0/L1/L2 pipeline with opt-in blending/diversity and explicit rollback modes. */
 @Service
 public class RecommendationOrchestrator {
     @org.springframework.beans.factory.annotation.Autowired
@@ -134,7 +134,12 @@ public class RecommendationOrchestrator {
             throw new RecommendationGenerationException("L1 model and cache configuration disagree", ex);
         }
 
-        Optional<RecommendationResult> cachedResult = cache.getResult(memberId);
+        if (pipeline != null && pipeline.usesReranker()) {
+            var pool = cache.getPool(memberId);
+            if (pool.isPresent()) return Optional.of(select(pool.orElseThrow(), limit));
+        }
+        Optional<RecommendationResult> cachedResult = pipeline != null && pipeline.usesReranker()
+                ? Optional.empty() : cache.getResult(memberId);
         if (cachedResult.isPresent()) {
             return Optional.of(limit(cachedResult.orElseThrow(), limit));
         }
@@ -154,6 +159,11 @@ public class RecommendationOrchestrator {
         }
 
         if (candidates.isEmpty()) {
+            if (pipeline != null && pipeline.usesReranker()) {
+                var pool = new ScoredPool(memberId, List.of());
+                cache.putPool(memberId, pool);
+                return Optional.of(select(pool, limit));
+            }
             RecommendationResult empty = new RecommendationResult(memberId, List.of());
             cache.putResult(memberId, empty);
             return Optional.of(empty);
@@ -174,6 +184,22 @@ public class RecommendationOrchestrator {
                 if (heavy == null || heavy.size() != ranked.size()) throw new HeavyRankerException("Incomplete L2 batch");
                 for (int i = 0; i < ranked.size(); i++) {
                     if (heavy.get(i) == null || !heavy.get(i).l1().equals(ranked.get(i))) throw new HeavyRankerException("L2 changed survivor membership/order");
+                }
+                if (pipeline.usesReranker()) {
+                    var byId = new java.util.HashMap<Long, com.ahdyahmed.pymk.domain.entity.Member>();
+                    members.findAllById(heavy.stream().map(HeavyScoredCandidate::candidateId).toList())
+                            .forEach(member -> byId.put(member.getId(), member));
+                    var rows = heavy.stream().map(row -> {
+                        var member = byId.get(row.candidateId());
+                        if (member == null) throw new HeavyRankerException("Missing member for employer selection");
+                        return new ScoredPool.Row(new Recommendation(row.candidateId(),
+                                pipeline.policy().blend(row.probabilities().inviteSent(), row.probabilities().inviteAccepted()),
+                                row.l1().mutualConnectionCount(), reasons(row.l1().candidate().sourceHits(), row.l1().mutualConnectionCount())),
+                                member.getCompany());
+                    }).toList();
+                    var pool = new ScoredPool(memberId, rows);
+                    cache.putPool(memberId, pool);
+                    return Optional.of(select(pool, limit));
                 }
                 recommendations = heavy.stream()
                         .sorted(java.util.Comparator.comparingDouble((HeavyScoredCandidate row) -> row.probabilities().inviteAccepted()).reversed()
@@ -199,6 +225,10 @@ public class RecommendationOrchestrator {
         }
         return new RecommendationResult(
                 result.memberId(), result.recommendations().subList(0, limit));
+    }
+
+    private RecommendationResult select(ScoredPool pool, int limit) {
+        return timed("rerank", () -> pool.select(pipeline.policy(), limit));
     }
 
     private static Recommendation toRecommendation(LightRankedCandidate ranked) {

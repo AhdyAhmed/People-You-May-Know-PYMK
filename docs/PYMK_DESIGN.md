@@ -56,18 +56,19 @@ status differ.
 | Batched, release-compatible Java heavy scorer with two named probability heads | Implemented on Day 26; see `DAY26_HEAVY_SERVING.md` |
 | Frozen ONNX evaluation, raw calibration diagnostics, requester bootstrap and replay-context subgroup/stage analysis | Implemented on Day 27; see `DAY27_EVALUATION.md` |
 | Configurable public L2 serving, L1 rollback, content/revision cache isolation and stage timers | Implemented on Day 28; see `DAY28_PUBLIC_L2.md` |
-| Blending and re-ranker | Planned for Days 29–30 |
+| Configured two-head blending and deterministic employer exposure selection | Implemented on Day 29; see `DAY29_BLEND_DIVERSITY.md` |
+| Offline blend-weight optimization | Planned for Day 30 |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 28 complete**. Target-only sections below use
+The current checkpoint is **Day 29 complete**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
 
-The runnable checkpoint is the public L0 → L1 pipeline with explicit optional L2, plus offline profile
+The runnable checkpoint is the public L0 → L1 pipeline with explicit optional L2 and re-ranking, plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
 datasets plus offline heavy-model training, an opt-in Java L2 scorer and frozen
-offline evaluation and safe process-level L1 rollback. Days 29–30 extend it;
+offline evaluation and safe process-level L1/L2 rollback. Day 30 adds offline weight tuning;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -390,7 +391,8 @@ and output semantics. Inference validates finite probabilities in [0,1]; native
 inputs/results are scoped and model close is serialized against concurrent inference.
 Spring loading is explicit opt-in; missing/invalid enabled artifacts fail startup.
 Day 28 pins the entire L0/L1/L2 request together. Public L2 `score` is the acceptance
-head, ordered descending with candidate-ID ties; blending remains Day 29. The mode
+head, ordered descending with candidate-ID ties. Day 29 adds explicit `RERANK`
+mode with normalized two-head blending and employer exposure selection. The mode
 is exposed in `X-PYMK-Scorer`. Incompatible release/model/features fail `503`, even
 on warm cache lookups; no automatic L1 fallback occurs. L1 rollback is an explicit
 process restart and can disable all heavy artifact loading. See `DAY28_PUBLIC_L2.md`.
@@ -434,13 +436,15 @@ path returns a complete result or the established `503` contract.
 **Goal:** final blending + exposure-diversity constraints, producing the top-N (e.g. 20) shown to the user.
 
 - Combines L2's multiple predicted probabilities via a weighted linear blend: `score = w1*P(sent) + w2*P(accepted) + ...`
-- Weights `w1, w2...` are tuned offline via **Bayesian optimization** (e.g. a small Python job using `scikit-optimize` on the validation cohort), then loaded as configuration into `pymk-reranker`.
-- **Exposure-diversity pass:** cap the proportion of results from any single dominant cluster (e.g. no more than 40% from the same employer) using a deterministic constrained re-sort. This improves result diversity but is not, by itself, a protected-attribute fairness guarantee; any fairness claim requires explicit groups, metrics, and evaluation.
+- Day 29 loads normalized sent/accepted weights from configuration. Day 30 will tune them offline via **Bayesian optimization** against a declared validation-only objective; default equal weights are not optimized.
+- **Exposure-diversity pass:** cap each known employer's count based on the requested size (default 40%). This is not a bound on the fraction of an underfilled returned page, nor a protected-attribute fairness guarantee; any fairness claim requires explicit groups, metrics, and evaluation.
 
-Day 29 will require nonnegative, finite blend weights normalized to sum to one,
-keeping the blended score in `[0,1]`. Diversity changes display order, so the
-Day 21 non-increasing-score invariant must be replaced with the documented
-diversity-order contract at that cutover, with a new pipeline version.
+Day 29 implements nonnegative, finite blend weights normalized to sum to one,
+keeping the blended score in `[0,1]`. Sort by blend score descending and candidate
+ID ascending, then greedily skip capped employers. This produces a score-ordered
+subsequence, so the non-increasing-score invariant remains valid. The updated
+mode-aware smoke also checks tie order and the exposure report. `RERANK` uses the
+new `day29-blend-employer-v1` identity; L1 and L2 rollback modes remain unchanged.
 
 Cache the reusable scored candidate pool before diversity selection, then apply
 the cap for each requested limit. A cap of fraction `r` for requested size `n`
@@ -449,6 +453,13 @@ values do not form one artificial dominant employer. Select greedily in stable
 score order, skip candidates exceeding a cap, and return fewer results when
 the pool cannot satisfy the constraints; never duplicate candidates or relax
 caps silently. Limits 1, 2, 20, and 100 require explicit acceptance tests.
+
+Employer grouping uses stripped, `Locale.ROOT` lowercased current company values;
+blank/null values are exempt and reported separately. Batch-load member profiles
+once per cold pool, and cache all L1 survivors, not only the top 100. The response
+reports requested/returned size, known-group cap/counts, unknown count and maximum
+realized known-group fraction. See [the Day 29 runbook](DAY29_BLEND_DIVERSITY.md)
+for config, exact ordering, cache versioning, failure behavior and verification.
 
 Day 30 tunes weights on validation data only; the untouched test partition is
 used once for the final comparison. With synthetic data and no impression/
@@ -489,7 +500,7 @@ sequenceDiagram
 ### Cache correctness
 
 - **Implemented on Day 12:** L0 and final-result keys include schema, pipeline, and model versions so deployments do not serve structurally stale values.
-- L0 defaults to a 30-minute TTL and the final top-100 result to 15 minutes. The API slices that reusable result to the requested 1–100 limit.
+- L0 defaults to a 30-minute TTL. L1/L2 cache the final top-100 result for 15 minutes, slicing to the requested 1–100 limit. RERANK instead caches the entire pre-selection scored pool for the result TTL and reapplies the request-size-specific employer cap on every hit.
 - Successful connection mutations invalidate both layers after commit for both endpoints and their two-hop neighborhoods; this covers requesters whose at-most-three-hop candidate paths can change. TTL remains a consistency backstop.
 - Cache reads, writes, corrupt payloads, and invalidation failures degrade to the underlying pipeline instead of failing recommendation requests.
 - Cached payloads are JSON representations of immutable candidate/recommendation contracts, never JPA entities.
@@ -506,6 +517,11 @@ mutations made in L2 mode. The global revision invalidates broadly and adds a DB
 read per request; old entries expire by TTL. This does not claim serializable graph
 responses for writes concurrent with a request, nor permit edits to immutable
 release feature/model rows. M8 must evaluate throughput and finer-grained fencing.
+
+Day 29's scored-pool identity additionally includes normalized blend weights and
+employer cap/grouping semantics. It cannot collide with L1/L2 result caches.
+Profile changes advance the same source revision, invalidating old cached employer
+groups. Blank groups remain valid; missing member rows fail the cold request.
 
 ---
 
@@ -875,7 +891,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
 3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, contract-validated batched Java serving, and the public L0 → L1 cutover are **complete through Day 21**.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
-5. **M5 — Re-ranker**: blending + exposure diversification.
+5. **M5 — Re-ranker**: blending + exposure diversification implemented on Day 29; validation-only weight tuning and M5 closure remain Day 30.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.
 7. **M7 — Batch operations**: scheduling, restartability, idempotency, reconciliation, and remaining production-style batch jobs.
 8. **M8 — Observability + offline eval dashboard**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, and Recall@k tracking over time.

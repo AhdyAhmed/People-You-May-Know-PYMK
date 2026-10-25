@@ -31,7 +31,9 @@ class OpenApiDocsTest {
                 .andExpect(jsonPath("$.paths['/api/v1/members/{id}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get.responses['200'].headers['X-PYMK-Scorer']").exists())
-                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get.description").value(org.hamcrest.Matchers.containsString("L2")));
+                .andExpect(jsonPath("$.paths['/api/v1/pymk/{memberId}'].get.description").value(org.hamcrest.Matchers.containsString("RERANK")))
+                .andExpect(jsonPath("$.components.schemas.PymkResponse.properties.exposure").exists())
+                .andExpect(jsonPath("$.components.schemas.Exposure.properties.knownGroupCap").exists());
     }
 
     @Test

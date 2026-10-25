@@ -28,6 +28,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class RecommendationOrchestratorTest {
+    @Test void rerankerRejectsMissingMemberRatherThanTreatingItAsUnknownEmployer() {
+        var heavy = mock(com.ahdyahmed.pymk.heavyranker.L2HeavyRanker.class);
+        var model = mock(com.ahdyahmed.pymk.heavyranker.HeavyRankerModel.class);
+        when(model.artifactIdentity()).thenReturn("a".repeat(64));
+        org.springframework.test.util.ReflectionTestUtils.setField(orchestrator,"pipeline",new ServingPipeline("RERANK",heavy,model,500,500));
+        when(members.existsById(42L)).thenReturn(true);
+        var candidates=List.of(candidate(101,.3,CandidateSourceType.EMBEDDING,Map.of()));
+        var survivors=candidates.stream().map(c -> ranked(c,.5,0)).toList();
+        when(generator.generate(42L)).thenReturn(candidates);
+        when(lightRanker.rank(42L,candidates)).thenReturn(survivors);
+        when(heavy.score(42L,survivors)).thenReturn(List.of(new com.ahdyahmed.pymk.heavyranker.HeavyScoredCandidate(
+                survivors.getFirst(),new com.ahdyahmed.pymk.heavyranker.HeavyRankerModel.Probabilities(.6f,.7f),"release",1,"heavy")));
+        when(members.findAllById(List.of(101L))).thenReturn(List.of());
+        assertThatThrownBy(() -> orchestrator.getRecommendations(42,20)).isInstanceOf(RecommendationGenerationException.class)
+                .hasCauseInstanceOf(com.ahdyahmed.pymk.heavyranker.HeavyRankerException.class);
+        verify(cache,never()).putPool(anyLong(),org.mockito.ArgumentMatchers.any());
+    }
     @Test
     void l2ScoresAllSurvivorsBeforeLimitingAndUsesAcceptedHeadWithIdTies() {
         var heavy = mock(com.ahdyahmed.pymk.heavyranker.L2HeavyRanker.class);

@@ -33,6 +33,10 @@ pymk:
     # Explicit opt-in after evaluation; L1 is the safe rollback mode.
     ranker: ${PYMK_SERVING_RANKER:L1}
     max-concurrent-requests: 2
+  reranker:
+    sent-weight: ${PYMK_BLEND_SENT_WEIGHT:0.5}
+    accepted-weight: ${PYMK_BLEND_ACCEPTED_WEIGHT:0.5}
+    employer-cap-fraction: ${PYMK_EMPLOYER_CAP_FRACTION:0.4}
   heavy-ranker:
     enabled: ${PYMK_L2_ENABLED:false}
     model-path: ${PYMK_L2_MODEL_PATH:artifacts/models/heavy/heavy-mlp-v1.onnx}

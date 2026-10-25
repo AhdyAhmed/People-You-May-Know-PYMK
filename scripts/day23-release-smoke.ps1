@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker)
+if ($IncludeReranker) { $IncludeL2Serving = $true }
 if ($IncludeL2Serving) { $IncludeEvaluation = $true }
 if ($IncludeEvaluation) { $IncludeJavaHeavy = $true }
 if ($IncludeJavaHeavy) { $IncludeHeavy = $true }
@@ -19,7 +20,7 @@ function StartSmokeApi([string]$mode) {
     }
     $script:apiBoot++
     $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
-    if ($mode -eq 'L2' -or ($IncludeJavaHeavy -and -not $IncludeL2Serving)) {
+    if ($mode -in @('L2','RERANK') -or ($IncludeJavaHeavy -and -not $IncludeL2Serving)) {
         $apiArgs += @('--pymk.heavy-ranker.enabled=true',"--pymk.heavy-ranker.model-path=$output/heavy/heavy-mlp-v1.onnx","--pymk.heavy-ranker.metadata-path=$output/heavy/heavy-mlp-v1.metadata.json")
     } else { $apiArgs += '--pymk.heavy-ranker.enabled=false' }
     $quoted = $apiArgs | ForEach-Object { '"' + $_ + '"' }
@@ -164,6 +165,26 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         StartSmokeApi 'L2'
         if ((CheckResponse) -ne $heavyFirst) { throw 'L2 re-enable changed the frozen release response' }
         Write-Host 'PASS: Day 28 public L2 HTTP scoring, incompatible-release 503, L1-only process rollback and L2 re-enable with shared Redis'
+    }
+    if ($IncludeReranker) {
+        StartSmokeApi 'RERANK'
+        foreach ($limit in @(1,2,20,100)) {
+            & "$PSScriptRoot/day13-recommendation-smoke.ps1" -BaseUrl "http://127.0.0.1:$port" -MemberId 1 -Limit $limit
+        }
+        $reranked = Invoke-RestMethod "http://127.0.0.1:$port/api/v1/pymk/1?limit=2"
+        if ($reranked.recommendations.Count -ne 2 -or $reranked.exposure.knownGroupCounts.acme -ne 1 -or $reranked.exposure.knownGroupCap -ne 1) {
+            throw 'Expected two candidates with at most one from each known employer at limit=2'
+        }
+        $poolKeys = & docker exec $redis redis-cli --scan --pattern '*:scored-pool-v1:*:scorer:day29-*'
+        if (-not $poolKeys) { throw 'Missing versioned reusable scored pool' }
+        StartSmokeApi 'L2'
+        if ((CheckResponse) -ne $heavyFirst) { throw 'Reranker rollback changed L2 response' }
+        StartSmokeApi 'RERANK'
+        $reEnabled = Invoke-RestMethod "http://127.0.0.1:$port/api/v1/pymk/1?limit=2"
+        if (($reEnabled | ConvertTo-Json -Depth 10 -Compress) -ne ($reranked | ConvertTo-Json -Depth 10 -Compress)) {
+            throw 'Reranker re-enable changed selection'
+        }
+        Write-Host 'PASS: Day 29 blend/diversity HTTP contract at limits 1/2/20/100, scored pool cache, L2 rollback and reranker re-enable'
     }
     Write-Host "PASS: real training, activation, database-model startup, HTTP probabilities, caching and two rollbacks. Evidence: $output"
 } finally {

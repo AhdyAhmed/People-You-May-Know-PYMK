@@ -18,7 +18,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * Redis-backed, versioned cache for the expensive L0 union and final response.
+ * Redis-backed, versioned cache for the L0 union, L1/L2 response, and unselected RERANK pool.
  * Redis and payload failures deliberately degrade to a cache miss.
  */
 @Service
@@ -85,7 +85,8 @@ public class RecommendationCache {
         return read(resultKey(memberId), json -> {
             RecommendationResult result = Objects.requireNonNull(
                     objectMapper.readValue(json, RecommendationResult.class));
-            if (result.memberId() != memberId || result.recommendations().size() > RecommendationOrchestrator.MAX_RESULTS) {
+            if (result.memberId() != memberId || result.exposure() != null
+                    || result.recommendations().size() > RecommendationOrchestrator.MAX_RESULTS) {
                 throw new IllegalArgumentException("Cached result has the wrong owner or exceeds the result cap");
             }
             HashSet<Long> ids = new HashSet<>();
@@ -117,6 +118,23 @@ public class RecommendationCache {
         write(resultKey(memberId), result, properties.getResultTtl());
     }
 
+    public Optional<ScoredPool> getPool(long memberId) {
+        if (!properties.isEnabled()) return Optional.empty();
+        return read(poolKey(memberId), json -> {
+            var pool = Objects.requireNonNull(objectMapper.readValue(json, ScoredPool.class));
+            if (pool.memberId() != memberId || pool.rows().size() > pipeline.poolLimit()) {
+                throw new IllegalArgumentException("Wrong pool owner or survivor budget exceeded");
+            }
+            return pool;
+        });
+    }
+
+    public void putPool(long memberId, ScoredPool pool) {
+        if (properties.isEnabled()) write(poolKey(memberId), pool, properties.getResultTtl());
+    }
+
+    String poolKey(long memberId) { return key("scored-pool-v1", memberId); }
+
     public void evictMembers(Collection<Long> memberIds) {
         if (!properties.isEnabled() || memberIds.isEmpty()) {
             return;
@@ -124,7 +142,9 @@ public class RecommendationCache {
         properties.validate();
         List<String> keys = memberIds.stream()
                 .distinct()
-                .flatMap(memberId -> List.of(candidateKey(memberId), resultKey(memberId)).stream())
+                .flatMap(memberId -> (pipeline != null && pipeline.usesReranker()
+                        ? List.of(candidateKey(memberId), resultKey(memberId), poolKey(memberId))
+                        : List.of(candidateKey(memberId), resultKey(memberId))).stream())
                 .toList();
         try {
             redis.delete(keys);

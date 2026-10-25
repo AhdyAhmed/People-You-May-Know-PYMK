@@ -14,9 +14,14 @@
   <artifactId>pymk-reranker</artifactId>
   <packaging>jar</packaging>
   <name>pymk-reranker</name>
-  <description>Fairness/diversity re-ranking and Bayesian-tuned score blending.</description>
+  <description>Validated score blending and deterministic employer exposure selection.</description>
 
   <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>com.ahdyahmed.pymk</groupId>
       <artifactId>pymk-common</artifactId>

@@ -16,7 +16,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M4 - Day 28: configurable L0 to L1 to L2 pipeline",
+                "milestone", "M5 - Day 29: weighted blend and employer exposure selection",
                 "scorer", pipeline.mode()
         );
     }

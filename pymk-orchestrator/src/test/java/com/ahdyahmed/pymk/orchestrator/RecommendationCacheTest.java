@@ -20,6 +20,23 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 class RecommendationCacheTest {
+    @Test void scoredPoolRoundTripAndInvalidPayloadsAreMisses() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(cache,"pipeline",new ServingPipeline("L1",null,null,500,500));
+        var pool = new ScoredPool(42, java.util.stream.LongStream.rangeClosed(100,340)
+                .mapToObj(id -> new ScoredPool.Row(new Recommendation(id,.5,0,List.of()), " Acme ")).toList());
+        var mapper = new ObjectMapper();
+        when(values.get(cache.poolKey(42))).thenReturn(mapper.writeValueAsString(pool));
+        assertThat(cache.getPool(42)).contains(pool);
+        cache.putPool(42,pool);
+        verify(values).set(org.mockito.ArgumentMatchers.eq(cache.poolKey(42)),org.mockito.ArgumentMatchers.eq(mapper.writeValueAsString(pool)),any(Duration.class));
+        for (String payload : List.of("null", "{invalid", "{\"memberId\":99,\"rows\":[]}",
+                "{\"memberId\":42,\"rows\":[{\"recommendation\":{\"candidateId\":42,\"score\":0.5,\"mutualConnectionCount\":0,\"reasons\":[]}}]}",
+                mapper.writeValueAsString(new ScoredPool(42,java.util.stream.LongStream.rangeClosed(100,600)
+                        .mapToObj(id -> new ScoredPool.Row(new Recommendation(id,.5,0,List.of()), "")).toList())))) {
+            when(values.get(cache.poolKey(42))).thenReturn(payload);
+            assertThat(cache.getPool(42)).isEmpty();
+        }
+    }
     @Test
     void modeArtifactAndSourceRevisionIsolateCachesAndRevisionIsPinned() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);

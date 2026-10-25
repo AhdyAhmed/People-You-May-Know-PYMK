@@ -34,13 +34,16 @@ public class PymkController {
 
     @GetMapping("/{memberId}")
     @Operation(summary = "Get people a member may know",
-            description = "Configured L1 or L0-L1-L2 pipeline. X-PYMK-Scorer identifies the active mode. "
+            description = "Configured L1, L2 or RERANK pipeline. X-PYMK-Scorer identifies the active mode. "
                     + "score is raw L1 acceptance probability in L1 mode, or the heavy invite_accepted_probability in L2 mode. "
-                    + "L2 ties use ascending candidate ID; neither score is a calibrated acceptance-rate claim. No automatic failure fallback.")
+                    + "RERANK blends both heavy heads using normalized weights and caps each known employer at max(1,floor(capFraction*requestedLimit)). "
+                    + "Blank employers are exempt. Results may underfill; exposure reports realized counts and maximum fraction. "
+                    + "RERANK display order is descending blend score after filtering, with ascending candidate-ID ties. "
+                    + "L2 ties use ascending candidate ID; scores are not calibrated acceptance-rate or protected-attribute fairness claims. No automatic failure fallback.")
     @ApiResponse(responseCode = "200", description = "Recommendations generated",
             headers = @io.swagger.v3.oas.annotations.headers.Header(name = "X-PYMK-Scorer",
                     description = "Active scoring mode; identifies score semantics",
-                    schema = @Schema(type = "string", allowableValues = {"L1", "L2"})))
+                    schema = @Schema(type = "string", allowableValues = {"L1", "L2", "RERANK"})))
     @ApiResponse(responseCode = "400", description = "Member ID or limit is invalid",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))

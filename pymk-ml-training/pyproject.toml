@@ -23,6 +23,7 @@ pymk-train-light-ranker = "pymk_training.train_light_ranker:main"
 pymk-profile-embeddings = "pymk_training.profile_embeddings:main"
 pymk-train-heavy-ranker = "pymk_training.train_heavy_ranker:main"
 pymk-evaluate-heavy-ranker = "pymk_training.evaluate_heavy_ranker:main"
+pymk-tune-blend = "pymk_training.tune_blend:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

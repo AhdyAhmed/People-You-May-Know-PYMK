@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning)
+if ($IncludeBlendTuning) { $IncludeReranker = $true }
 if ($IncludeReranker) { $IncludeL2Serving = $true }
 if ($IncludeL2Serving) { $IncludeEvaluation = $true }
 if ($IncludeEvaluation) { $IncludeJavaHeavy = $true }
@@ -20,6 +21,10 @@ function StartSmokeApi([string]$mode) {
     }
     $script:apiBoot++
     $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
+    if ($mode -eq 'RERANK' -and $IncludeBlendTuning) {
+        $configPath = "$output/blend/application-blend.properties" -replace '\\','/'
+        $apiArgs += "--spring.config.additional-location=file:$configPath"
+    }
     if ($mode -in @('L2','RERANK') -or ($IncludeJavaHeavy -and -not $IncludeL2Serving)) {
         $apiArgs += @('--pymk.heavy-ranker.enabled=true',"--pymk.heavy-ranker.model-path=$output/heavy/heavy-mlp-v1.onnx","--pymk.heavy-ranker.metadata-path=$output/heavy/heavy-mlp-v1.metadata.json")
     } else { $apiArgs += '--pymk.heavy-ranker.enabled=false' }
@@ -120,6 +125,15 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
     if ($IncludeHeavy) {
         Checked $Python @('-m','pymk_training.train_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--output-dir',"$output/heavy",'--model-version','heavy-mlp-v1','--embedding-transform',$transform,'--l1-model',$model,'--l1-metadata',$metadata)
         Write-Host 'PASS: Day 25 two-head PyTorch training, named ONNX parity and frozen-cohort comparisons'
+        if ($IncludeBlendTuning) {
+            Checked $Python @('-m','pymk_training.blend_context_fixture','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--profiles',"$root/pymk-ml-training/tests/fixtures/profiles.csv",'--output',"$output/blend-context.json")
+            Checked $Python @('-m','pymk_training.tune_blend','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--model',"$output/heavy/heavy-mlp-v1.onnx",'--metadata',"$output/heavy/heavy-mlp-v1.metadata.json",'--l1-model',$model,'--l1-metadata',$metadata,'--policy',"$root/pymk-ml-training/blend-policy.json",'--context',"$output/blend-context.json",'--output-dir',"$output/blend")
+            $blend = Get-Content "$output/blend/report.json" -Raw | ConvertFrom-Json
+            if ($blend.automaticPromotion -or $blend.optimizer.trials.Count -ne $blend.policy.searchBudget) { throw 'Invalid tuning report' }
+            $digest = (Get-FileHash "$output/blend/application-blend.properties" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($digest -ne $blend.configurationSha256) { throw 'Tuned configuration checksum mismatch' }
+            Write-Host 'PASS: Day 30 validation-only Bayesian search and immutable deployment configuration'
+        }
         if ($IncludeEvaluation) {
             Checked $Python @('-m','pymk_training.evaluate_heavy_ranker','--input',"$output/v2-0.csv",'--input',"$output/v2-1.csv",'--input',"$output/v2-2.csv",'--model',"$output/heavy/heavy-mlp-v1.onnx",'--metadata',"$output/heavy/heavy-mlp-v1.metadata.json",'--l1-model',$model,'--l1-metadata',$metadata,'--policy',"$root/pymk-ml-training/evaluation-policy.json",'--output',"$output/heavy/evaluation.json")
             $evaluation = Get-Content "$output/heavy/evaluation.json" -Raw | ConvertFrom-Json
@@ -185,6 +199,16 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
             throw 'Reranker re-enable changed selection'
         }
         Write-Host 'PASS: Day 29 blend/diversity HTTP contract at limits 1/2/20/100, scored pool cache, L2 rollback and reranker re-enable'
+        if ($IncludeBlendTuning) {
+            $properties = Get-Content "$output/blend/application-blend.properties"
+            $sent = [double](($properties | Where-Object { $_ -like 'pymk.reranker.sent-weight=*' }) -split '=')[1]
+            $accepted = [double](($properties | Where-Object { $_ -like 'pymk.reranker.accepted-weight=*' }) -split '=')[1]
+            if ([Math]::Abs($sent + $accepted - 1) -gt 1e-12) { throw 'Exported weights are not normalized' }
+            $l1Budget = [int]$blend.policy.l1Survivors
+            $tunedKeys = & docker exec $redis redis-cli --scan --pattern "*:scored-pool-v1:*:scorer:day29-*-$l1Budget-*:release:release-3:3"
+            if (-not $tunedKeys) { throw 'Packaged RERANK did not load the exported survivor budget' }
+            Write-Host 'PASS: Day 30 tuned configuration loaded by the actual diversified HTTP endpoint, rollback and re-enable'
+        }
     }
     Write-Host "PASS: real training, activation, database-model startup, HTTP probabilities, caching and two rollbacks. Evidence: $output"
 } finally {

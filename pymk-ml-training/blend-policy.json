@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "objective": "accepted-hits-per-requested-slot",
+  "seed": 42,
+  "searchBudget": 20,
+  "k": 20,
+  "l1Survivors": 200,
+  "employerCapFraction": 0.4
+}

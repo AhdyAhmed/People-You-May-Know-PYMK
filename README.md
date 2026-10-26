@@ -6,8 +6,9 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> 🚧 **Status: Day 29 of 30 complete.** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 30 of 30 complete (M1–M5).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
+> Offline Bayesian blend tuning is implemented; Kafka and operational extensions remain M6–M9.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -29,13 +30,13 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the end-state funnel. At the current Day 29 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 30 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
 implemented, with frozen offline ranking/calibration evaluation and configurable
 public L2 serving, normalized blending and employer exposure selection.
-Offline blend-weight tuning remains Day 30.
+Validation-only Bayesian blend tuning exports immutable deployment configuration.
 
 ```mermaid
 flowchart LR
@@ -87,8 +88,10 @@ The application is runnable end to end. A recommendation request currently:
 compatibility checks, versioned caches, failure behavior and latency evidence.
 The [Day 29 blend/diversity runbook](docs/DAY29_BLEND_DIVERSITY.md) documents
 `PYMK_SERVING_RANKER=RERANK`, normalized weight/cap configuration, underfilled
-responses, scored-pool caching and rollback. Default blend weights are not tuned;
-Bayesian validation-only weight search remains Day 30.
+responses, scored-pool caching and rollback. Default blend weights are not automatically
+replaced. The [Day 30 tuning/deployment runbook](docs/DAY30_BLEND_TUNING.md) covers
+validation-only Bayesian search, baseline reports, immutable Spring properties and
+the complete seeded-to-HTTP smoke: `pwsh -File scripts/day23-release-smoke.ps1 -IncludeBlendTuning`.
 
 After completing the Quickstart below, request three recommendations with:
 
@@ -252,7 +255,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M5 - Day 29: weighted blend and employer exposure selection","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M5 - Day 30: reproducible offline blend tuning and diversified serving","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -633,6 +636,10 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       normalized weights, deterministic employer caps, full pre-selection pool
       caching, request-specific exposure reports, and real HTTP regression tests.
       See the [blend/diversity runbook](docs/DAY29_BLEND_DIVERSITY.md).
+- [x] **Day 30 — Bayesian blend tuning and M5 closure**: bounded seeded GP search
+      on validation only, fixed-cap diversity, held-out baseline comparisons,
+      cohort/artifact hashes, immutable Spring configuration and a packaged HTTP
+      deployment/rollback demo. See the [Day 30 runbook](docs/DAY30_BLEND_TUNING.md).
 - [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
 
 ## License

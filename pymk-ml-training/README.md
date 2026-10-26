@@ -156,6 +156,21 @@ The smoke script's `-IncludeHeavy` switch trains both models on fresh Java expor
 and then verifies the unchanged L1 HTTP/rollback path. Java L2 serving remains
 Day 26; heavy training never changes the active application release.
 
+## Day 30 — offline blend tuning
+
+`python -m pymk_training.tune_blend --help` exposes a validation-only Bayesian
+search over normalized heavy-head weights with a fixed employer cap. The
+predeclared `blend-policy.json` fixes the seed, budget and accepted-hits-per-requested-
+slot ranking objective. It publishes immutable `report.json` and
+`application-blend.properties` files; serving mode remains an explicit decision.
+
+The report contains validation/test baseline comparisons, cohort/artifact/context
+hashes, all trials and realized exposure. Test metrics never choose weights.
+This is an exported-pool proxy, not historical L0 replay or causal lift. See the
+[Day 30 runbook](../docs/DAY30_BLEND_TUNING.md) for inputs, commands, deployment
+and rollback. The full packaged demo is
+`pwsh -File scripts/day23-release-smoke.ps1 -IncludeBlendTuning` from the repo root.
+
 ## Verify
 
 ```powershell

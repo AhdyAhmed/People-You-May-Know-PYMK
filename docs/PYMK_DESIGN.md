@@ -57,10 +57,10 @@ status differ.
 | Frozen ONNX evaluation, raw calibration diagnostics, requester bootstrap and replay-context subgroup/stage analysis | Implemented on Day 27; see `DAY27_EVALUATION.md` |
 | Configurable public L2 serving, L1 rollback, content/revision cache isolation and stage timers | Implemented on Day 28; see `DAY28_PUBLIC_L2.md` |
 | Configured two-head blending and deterministic employer exposure selection | Implemented on Day 29; see `DAY29_BLEND_DIVERSITY.md` |
-| Offline blend-weight optimization | Planned for Day 30 |
+| Validation-only Bayesian blend search and immutable deployable configuration | Implemented on Day 30; see `DAY30_BLEND_TUNING.md` |
 | Kafka event backbone, transactional outbox, and streaming projections | Planned for Days 31–35 (M6) |
 
-The current checkpoint is **Day 29 complete**. Target-only sections below use
+The current checkpoint is **Day 30 complete (M1–M5)**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
@@ -68,7 +68,7 @@ future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 The runnable checkpoint is the public L0 → L1 pipeline with explicit optional L2 and re-ranking, plus offline profile
 embedding generation with coordinated live release activation and offline multi-target
 datasets plus offline heavy-model training, an opt-in Java L2 scorer and frozen
-offline evaluation and safe process-level L1/L2 rollback. Day 30 adds offline weight tuning;
+offline evaluation and safe process-level L1/L2 rollback. Day 30 adds reproducible offline weight tuning;
 Days 31–35 add Kafka. M7–M9 remain separate operational/release milestones,
 without a promised calendar duration. Each milestone must leave a reproducible
 demo, checked artifact contracts, automated failure cases, and a rollback path.
@@ -436,7 +436,7 @@ path returns a complete result or the established `503` contract.
 **Goal:** final blending + exposure-diversity constraints, producing the top-N (e.g. 20) shown to the user.
 
 - Combines L2's multiple predicted probabilities via a weighted linear blend: `score = w1*P(sent) + w2*P(accepted) + ...`
-- Day 29 loads normalized sent/accepted weights from configuration. Day 30 will tune them offline via **Bayesian optimization** against a declared validation-only objective; default equal weights are not optimized.
+- Day 29 loads normalized sent/accepted weights from configuration. Day 30 tunes them offline via a seeded **Gaussian-process / expected-improvement Bayesian search** against a declared validation-only objective; default equal weights are not optimized or automatically replaced.
 - **Exposure-diversity pass:** cap each known employer's count based on the requested size (default 40%). This is not a bound on the fraction of an underfilled returned page, nor a protected-attribute fairness guarantee; any fairness claim requires explicit groups, metrics, and evaluation.
 
 Day 29 implements nonnegative, finite blend weights normalized to sum to one,
@@ -461,13 +461,26 @@ reports requested/returned size, known-group cap/counts, unknown count and maxim
 realized known-group fraction. See [the Day 29 runbook](DAY29_BLEND_DIVERSITY.md)
 for config, exact ordering, cache versioning, failure behavior and verification.
 
-Day 30 tunes weights on validation data only; the untouched test partition is
-used once for the final comparison. With synthetic data and no impression/
-propensity logs, the objective is a declared offline ranking proxy, not an
-estimate of causal engagement lift. Record the objective, seed, search budget,
-selected weights, and baseline comparison so the experiment can be reproduced.
+Day 30 tunes one sent weight (accepted weight is its complement) on validation
+data only. The fixed cap cannot be relaxed by the optimizer. The objective is
+requester/snapshot-macro accepted hits divided by requested slots after diversity,
+so underfilled responses do not artificially inflate precision. A bounded seeded
+GP search includes equal-weight and single-head baselines; ties prefer equal
+weights. Freeze selection before reporting test metrics for the selected policy
+and fixed baselines. Test labels never participate in weight selection; earlier
+Day 27 reports on the same test cohort do not make it globally unseen data.
 
-### Target orchestration flow (L2 implemented; blending/re-ranking planned)
+The reproducible report binds inputs, models, context, policy, code and runtime
+versions and records trial history, cohort hashes, exposure and baseline metrics.
+Immutable Spring properties carry weights/cap and matched L1/L2 capacities into
+the actual Day 29 endpoint, without enabling it automatically. This evaluates an
+exported-pool L1 score/ID proxy, not historical L0 eligibility or online L1 fusion
+ties. Historical employer context is required; the local demo explicitly uses
+constant synthetic profiles. No impression/propensity logs means no causal lift
+claim. See [Day 30 deployment/evaluation runbook](DAY30_BLEND_TUNING.md) for
+limitations, immutable publication, manual promotion and rollback.
+
+### Implemented orchestration flow (explicit RERANK mode)
 
 ```mermaid
 sequenceDiagram
@@ -891,7 +904,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 2. **M2 — Naive PYMK**: heuristic, graph, and embedding L0 sources with provenance and eligibility filtering; mutual-connection ordering straight to the API; versioned Redis caching and mutation invalidation; end-to-end relevance and safety QA; runnable release documentation. **Complete through Day 14.**
 3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, contract-validated batched Java serving, and the public L0 → L1 cutover are **complete through Day 21**.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
-5. **M5 — Re-ranker**: blending + exposure diversification implemented on Day 29; validation-only weight tuning and M5 closure remain Day 30.
+5. **M5 — Re-ranker**: blending + exposure diversification, validation-only Bayesian weight tuning, immutable configuration/report artifacts and a seeded-to-packaged-HTTP rollback demo are **complete through Day 30**. No automatic production promotion or causal lift is claimed.
 6. **M6 — Kafka event backbone**: versioned event contracts, transactional outbox publishing, idempotent consumers, streaming feature projections, retries/dead-letter handling, and end-to-end Testcontainers coverage.
 7. **M7 — Batch operations**: scheduling, restartability, idempotency, reconciliation, and remaining production-style batch jobs.
 8. **M8 — Observability + offline eval dashboard**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, and Recall@k tracking over time.

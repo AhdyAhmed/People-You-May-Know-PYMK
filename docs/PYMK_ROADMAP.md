@@ -4,7 +4,7 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 29 complete; Day 30 is next. Target-architecture
+**Current checkpoint:** Day 30 complete (M1–M5); Day 31 / Kafka is next. Target-architecture
 modules remain intentionally empty until their scheduled day.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
@@ -12,7 +12,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–29 are the implementation record. Unchecked future days below
+Completed Days 1–30 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,12 +20,13 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–29 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–30 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
 Day 28 adds explicit public L2 serving with an L1 rollback path. Day 29 adds
-configured blending and employer exposure selection; Day 30 will tune weights offline.
+configured blending and employer exposure selection; Day 30 adds validation-only
+Bayesian tuning and immutable deployment configuration without automatic promotion.
 M7 later extends it to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
@@ -233,10 +234,11 @@ table and section 7.1 manifest contract when implementing those gates.
 - Describe the cap as a count based on requested size, not a guaranteed fraction of an underfilled response. Report returned size and realized group exposure; test heavily concentrated and entirely blank-group pools.
 - Implemented opt-in `RERANK` mode with normalized finite weights, decimal-safe requested-size caps, stable score/ID ordering, case-normalized known employers and exempt blank groups. All L1 survivors are cached before per-request selection, with policy/artifact/release/source-revision isolation. L1/L2 rollback semantics remain intact. Unit and real ONNX/HTTP tests cover all four limits, 242-survivor backfilling, profile/connection invalidation, empty pools and failure safety. See [Day 29 runbook](DAY29_BLEND_DIVERSITY.md); `-IncludeReranker` extends the fresh-training packaged smoke with exposure checks and rollback/re-enable.
 
-**Day 30 — Bayesian weight tuning (offline)**
+**Day 30 — Bayesian weight tuning (offline) ✅**
 - Search weights against validation data using a declared offline ranking objective; reserve test data for the final evaluation and reject invalid or diversity-breaking weight sets.
 - Save the seed, search budget, cohort hashes, selected configuration, baseline comparison, and reproducible report. Without impression/propensity logs, describe the result as a synthetic ranking proxy, not causal engagement lift.
 - Close M5 with a documented local run from seeding through the actual ranked/diversified HTTP endpoint, immutable release versions, and rollback instructions.
+- Implemented a seeded fixed-RBF GP/expected-improvement search over normalized two-head weights, with a fixed employer cap and macro accepted-hits/requested-slot objective. Validation alone selects weights; fixed test/baseline comparisons follow selection. Hash-bound employer context, input mutation rejection, immutable report/config publication and Java/Python policy parity are tested. The exported-pool proxy does not claim exact historical L0 replay or causal lift. `-IncludeBlendTuning` extends the fresh-training smoke to load exported properties into the packaged RERANK API and exercise rollback/re-enable. See [Day 30 runbook](DAY30_BLEND_TUNING.md). M5 is complete; production quality promotion and M6–M9 remain separate work.
 
 ---
 

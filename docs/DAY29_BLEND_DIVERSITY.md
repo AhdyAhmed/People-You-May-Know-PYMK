@@ -1,5 +1,9 @@
 # Day 29 — weighted blend and employer exposure selection
 
+This records the Day 29 checkpoint. [Day 30](DAY30_BLEND_TUNING.md) now adds the
+offline tuner and immutable deployable configuration; the serving policy below
+is unchanged, and equal weights remain the default until explicitly configured.
+
 The public endpoint now supports the complete **L0 → L1 → L2 → re-ranker**
 pipeline through explicit `RERANK` mode. L1 remains the default; L2 acceptance-only
 serving remains available. No model-quality promotion is implied. Day 30's offline

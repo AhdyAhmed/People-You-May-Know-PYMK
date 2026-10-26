@@ -162,14 +162,8 @@ def load_context(path, dataset, policy):
     return [lookup[key] for key in keys]
 
 
-def evaluate(inputs, model_path, metadata_path, l1_model, l1_metadata, policy_path, output, context_path=None):
-    output = Path(output)
-    if output.exists():
-        raise FileExistsError('evaluation reports are immutable; choose a new output path')
-    # Resolve and hash the predeclared policy before loading evaluation labels.
-    policy_bytes = Path(policy_path).read_bytes()
-    policy = load_policy(policy_path,policy_bytes)
-    policy_hash = hashlib.sha256(policy_bytes).hexdigest()
+def frozen_models(inputs, model_path, metadata_path, l1_model, l1_metadata):
+    """Shared immutable artifact validation; does not score the heavy model or fit anything."""
     dataset = load_multitarget_datasets(inputs)
     split = temporal_split(dataset)
     metadata = json.loads(Path(metadata_path).read_text(encoding='utf-8'))
@@ -201,6 +195,19 @@ def evaluate(inputs, model_path, metadata_path, l1_model, l1_metadata, policy_pa
             and native_inputs[0].shape[1] == 6, 'native heavy input contract differs')
     require({v.name for v in native_outputs} == set(OUTPUTS) and all(v.type == 'tensor(float)' and len(v.shape)==2
             and not isinstance(v.shape[0],int) and v.shape[1]==1 for v in native_outputs), 'native heavy output contract differs')
+    return dataset, split, metadata, l1, l1_identity, session
+
+
+def evaluate(inputs, model_path, metadata_path, l1_model, l1_metadata, policy_path, output, context_path=None):
+    output = Path(output)
+    if output.exists():
+        raise FileExistsError('evaluation reports are immutable; choose a new output path')
+    # Resolve and hash the predeclared policy before loading evaluation labels.
+    policy_bytes = Path(policy_path).read_bytes()
+    policy = load_policy(policy_path,policy_bytes)
+    policy_hash = hashlib.sha256(policy_bytes).hexdigest()
+    dataset, split, metadata, l1, l1_identity, session = frozen_models(
+        inputs, model_path, metadata_path, l1_model, l1_metadata)
     predictions = _probabilities(session,dataset.features)
     context = load_context(context_path,dataset,policy)
     report = {'schemaVersion':1, 'policy':policy, 'policySha256':policy_hash,

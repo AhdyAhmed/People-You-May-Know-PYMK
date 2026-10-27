@@ -6,9 +6,11 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 30 of 30 complete (M1–M5).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 31 complete (M1–M5 complete; M6 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
-> Offline Bayesian blend tuning is implemented; Kafka and operational extensions remain M6–M9.
+> Kafka development infrastructure and versioned event contracts are implemented.
+> Next: transactional outbox/event ingestion (Day 32), then consumers/projections (Days 33–35).
+> MLflow (M7, Days 36–40), Airflow (M8, Days 41–45), observability and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -30,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 30 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 31 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -141,17 +143,19 @@ API, so it should not be exposed publicly as-is.
 | Caching | Spring Data Redis |
 | Batch / ETL | Spring Batch |
 | Graph traversal | Postgres recursive CTE |
-| ML training | Python (scikit-learn/XGBoost/PyTorch) → ONNX/PMML |
-| ML serving | ONNX Runtime Java / JPMML-Evaluator |
+| ML training | Python scikit-learn (L1), PyTorch (L2) → ONNX |
+| ML serving | ONNX Runtime Java |
+| Event infrastructure | Apache Kafka 3.9.1 + Spring Kafka; v1 JSON Schema contracts (Day 31) |
 | Build | Maven multi-module |
 | Testing | JUnit 5, Testcontainers, Mockito, Python `unittest`, ONNX Runtime parity checks |
-| Local infra | Docker Compose (Postgres + pgvector, Redis) |
+| Local infra | Docker Compose (Postgres + pgvector, Redis; optional Kafka profile) |
 
 ## Repository layout
 
 ```
 pymk/
 ├── pymk-common/            # shared DTOs, enums, utils
+├── pymk-event-stream/      # v1 Kafka contracts and topology; outbox/consumers follow on Days 32–35
 ├── pymk-domain/            # JPA entities, repositories
 ├── pymk-feature-store/     # feature computation + read/write API
 ├── pymk-candidate-gen/     # L0: graph, EBR, heuristic candidate sources
@@ -167,11 +171,24 @@ pymk/
 └── docs/                   # design doc + roadmap
 ```
 
-`pymk-domain`, `pymk-api`, `pymk-datagen`, `pymk-candidate-gen`,
-`pymk-orchestrator`, `pymk-feature-store`, `pymk-batch`, and
-`pymk-ml-training`, `pymk-light-ranker`, and `pymk-heavy-ranker` have real content as of Day 26.
-The remaining modules are intentionally
-skeletal; see the roadmap for what fills in each module and when.
+All listed Java modules and the Python trainer have implemented content through
+Day 31. `pymk-event-stream` is a standalone contract library, intentionally not an
+API dependency yet; application event publishing and consumption remain future work.
+
+### Day 31 Kafka development profile
+
+```powershell
+docker compose -f infra/docker-compose.yml --profile kafka up -d --wait kafka
+docker compose -f infra/docker-compose.yml --profile kafka run --rm kafka-init
+./scripts/day31-kafka-smoke.ps1
+```
+
+Host clients use `localhost:9092`; Compose clients use `kafka:19092`. The initializer
+creates and validates two three-partition v1 topics; data survives broker recreation
+in a named volume. The broker is local/plaintext/single-node, not a production HA
+deployment. Kafka remains outside the recommendation request path. See the
+[Day 31 runbook](docs/DAY31_KAFKA_CONTRACTS.md) for contracts, replay/retention,
+duplicate identity, security boundaries, testing and cleanup.
 
 ## Data model & how to seed the DB
 
@@ -255,7 +272,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M5 - Day 30: reproducible offline blend tuning and diversified serving","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M6 - Day 31: Kafka infrastructure and versioned event contracts","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -640,7 +657,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       on validation only, fixed-cap diversity, held-out baseline comparisons,
       cohort/artifact hashes, immutable Spring configuration and a packaged HTTP
       deployment/rollback demo. See the [Day 30 runbook](docs/DAY30_BLEND_TUNING.md).
-- [ ] ... see the roadmap for the full plan through M9, including the post-Day-30 Kafka event backbone.
+- [x] **Day 31 — Kafka infrastructure and contracts**: optional persistent KRaft broker, checked topic initialization, strict versioned JSON Schemas, immutable envelopes, stable keys/identity comparison and real-broker tests. See the [Day 31 runbook](docs/DAY31_KAFKA_CONTRACTS.md).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. The implemented checkpoint is Day 31; Day 32 is next.
 
 ## License
 

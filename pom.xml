@@ -31,6 +31,7 @@
 
   <modules>
     <module>pymk-common</module>
+    <module>pymk-event-stream</module>
     <module>pymk-domain</module>
     <module>pymk-feature-store</module>
     <module>pymk-candidate-gen</module>
@@ -47,6 +48,11 @@
     <dependencies>
       <!-- Keep every module's Spring Boot / Spring Data / etc. versions aligned
            through the parent BOM. Module-specific deps are declared where used. -->
+      <dependency>
+        <groupId>com.ahdyahmed.pymk</groupId>
+        <artifactId>pymk-event-stream</artifactId>
+        <version>${project.version}</version>
+      </dependency>
       <dependency>
         <groupId>com.ahdyahmed.pymk</groupId>
         <artifactId>pymk-common</artifactId>

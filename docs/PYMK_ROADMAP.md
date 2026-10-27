@@ -1,18 +1,25 @@
-# PYMK Backend — 30-Day Build Roadmap
+# PYMK Backend — Build Roadmap: Core, Kafka & MLOps
 
 Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
-M6–M9 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
+M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 30 complete (M1–M5); Day 31 / Kafka is next. Target-architecture
-modules remain intentionally empty until their scheduled day.
+**Current checkpoint:** Day 31 complete (M1–M5 complete; M6 in progress).
+Day 32 / transactional outbox and event ingestion is next. The Kafka library
+and broker do not yet publish or consume application mutations.
+
+**Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
+Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
+release (M10). MLflow and Airflow are not implemented at the Day 31 checkpoint.
+This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
+batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
 **Definition of done for every day:** the reactor compiles, relevant automated
 tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–30 are the implementation record. Unchecked future days below
+Completed Days 1–31 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -20,14 +27,15 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–30 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–31 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
 Day 28 adds explicit public L2 serving with an L1 rollback path. Day 29 adds
 configured blending and employer exposure selection; Day 30 adds validation-only
 Bayesian tuning and immutable deployment configuration without automatic promotion.
-M7 later extends it to scheduled refreshes and reconciliation. Use the existing
+M7 adds tracked experiments and registry-backed release preparation; M8 extends
+the existing jobs to scheduled refreshes and reconciliation. Use the existing
 Day 19 trainer for a compatible L1 release when changing embeddings, rather than
 waiting for L2 or reusing placeholder-derived training features.
 
@@ -180,7 +188,7 @@ table and section 7.1 manifest contract when implementing those gates.
 - Stage a complete embedding generation with restartable computation, validate coverage and vector contracts, and activate it only after success; failed runs retain the previous active generation.
 - Rematerialize compatible pair features, define cache invalidation and rollback, and verify rerun determinism and interruption/restart behavior. Coordinate model/feature/embedding versions as one serving release.
 - Implement immutable generation IDs and a release record binding the staging manifest (source snapshot, transform hash/cutoff, vector generation and candidate budgets) to compatible features/model hashes. Preserve deployment pipeline/cache schema versions and add release ID/epoch to cache keys. Validate CSV hashes, duplicate/missing members and zero-vector coverage before promotion.
-- Stage compatible features and evaluate/retrain L1 with the existing Day 19 workflow on matching mature snapshots. Switch a single active-release pointer after all gates pass; pin it for each request and reject stale concurrent promoters. Inject import/feature/model failures and prove that active data and rollback remain usable. This prerequisite cannot be deferred to M7 or implemented with the Day 17 in-place writer alone.
+- Stage compatible features and evaluate/retrain L1 with the existing Day 19 workflow on matching mature snapshots. Switch a single active-release pointer after all gates pass; pin it for each request and reject stale concurrent promoters. Inject import/feature/model failures and prove that active data and rollback remain usable. This prerequisite cannot be deferred to future scheduling (now M8) or implemented with the Day 17 in-place writer alone.
 - Implemented: V7 release-scoped vectors/features, immutable transform/manifest registry, resumable import/member chunks, source-revision fencing, registered training exports and provenance sidecars, transform-compatible L1 training, AUC/ONNX promotion gates, database-held model artifacts, atomic epoch-checked activation/rollback and request-pinned release cache namespaces. The release record binds the staging manifest to the validated model contract (`pair-v1`); existing pipeline/cache schema configuration remains a deployment setting, not a mutable per-release override.
 - Reproduction and limitations: [Day 23 runbook](DAY23_RELEASES.md). `scripts/day23-release-smoke.ps1` exercises actual Python training, PostgreSQL/pgvector staging, public HTTP/ONNX serving, Redis namespaces and rollback with isolated containers. Automatic scheduling, retention cleanup, production-scale performance and Kafka remain future work.
 - Verified 2026-10-03: full 12-module `mvn verify`, 124 Java tests and 21 Python tests passed; real train-to-HTTP smoke and two rollback transitions passed. See the runbook's verification record for scope and fixture-quality limits.
@@ -238,7 +246,7 @@ table and section 7.1 manifest contract when implementing those gates.
 - Search weights against validation data using a declared offline ranking objective; reserve test data for the final evaluation and reject invalid or diversity-breaking weight sets.
 - Save the seed, search budget, cohort hashes, selected configuration, baseline comparison, and reproducible report. Without impression/propensity logs, describe the result as a synthetic ranking proxy, not causal engagement lift.
 - Close M5 with a documented local run from seeding through the actual ranked/diversified HTTP endpoint, immutable release versions, and rollback instructions.
-- Implemented a seeded fixed-RBF GP/expected-improvement search over normalized two-head weights, with a fixed employer cap and macro accepted-hits/requested-slot objective. Validation alone selects weights; fixed test/baseline comparisons follow selection. Hash-bound employer context, input mutation rejection, immutable report/config publication and Java/Python policy parity are tested. The exported-pool proxy does not claim exact historical L0 replay or causal lift. `-IncludeBlendTuning` extends the fresh-training smoke to load exported properties into the packaged RERANK API and exercise rollback/re-enable. See [Day 30 runbook](DAY30_BLEND_TUNING.md). M5 is complete; production quality promotion and M6–M9 remain separate work.
+- Implemented a seeded fixed-RBF GP/expected-improvement search over normalized two-head weights, with a fixed employer cap and macro accepted-hits/requested-slot objective. Validation alone selects weights; fixed test/baseline comparisons follow selection. Hash-bound employer context, input mutation rejection, immutable report/config publication and Java/Python policy parity are tested. The exported-pool proxy does not claim exact historical L0 replay or causal lift. `-IncludeBlendTuning` extends the fresh-training smoke to load exported properties into the packaged RERANK API and exercise rollback/re-enable. See [Day 30 runbook](DAY30_BLEND_TUNING.md). M5 is complete; production quality promotion and M6–M10 remain separate work.
 
 ---
 
@@ -248,10 +256,13 @@ Kafka is intentionally scheduled after the recommendation pipeline so it adds
 freshness and operational realism without blocking the first complete product.
 PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 
-**Day 31 — Kafka infrastructure + versioned contracts**
-- Add a single-broker Kafka development service and health check to Docker Compose, plus Spring Kafka/Testcontainers dependencies in a dedicated `pymk-event-stream` module.
-- Define compatibility-tested JSON Schema envelopes for `pymk.member-events.v1` and `pymk.connection-events.v1`, including stable IDs, event/ingestion timestamps, subject/target IDs, correlation ID, and schema version.
-- Specify per-topic keys, independent consumer groups, retention/replay windows, and local versus production durability expectations. Validate unknown versions and duplicate IDs with conflicting content; keep Kafka off the synchronous recommendation path.
+**Day 31 — Kafka infrastructure + versioned contracts ✅**
+
+- Added the standalone `pymk-event-stream` reactor module with Boot-managed Spring Kafka/Testcontainers dependencies, immutable typed envelopes, bounded strict schema/semantic validation and stable producer-content fingerprints. Unknown versions/types/fields, malformed values, duplicate JSON fields, wrong keys and same-ID conflicting producer content are covered by tests.
+- Added an optional `kafka` Compose profile using Apache Kafka 3.9.1 KRaft, loopback host/internal listeners, a persistent named volume, broker health check and idempotent topic initialization that rejects configuration drift. Both v1 topics have explicit three-partition, seven-day, append-time retention settings; local single-node durability is not advertised as production HA.
+- Published frozen v1 JSON Schemas/golden fixtures for `pymk.member-events.v1` and `pymk.connection-events.v1`, directional member keys and canonical connection-pair/aggregate-sequence contracts. Documented independent consumer groups, replay/deduplication horizons and future DLT recovery rules.
+- Added real-broker Spring Kafka publish/consume, per-key ordering, independent-group replay/committed-offset tests and a separate Compose smoke covering host listeners and persistence through broker recreation. The API remains Kafka-independent; durable receipts/outbox and consumer effects are still Days 32–35. See [Day 31 runbook](DAY31_KAFKA_CONTRACTS.md).
+- Verified 2026-10-09: all 13 reactor projects succeeded with 212 Java tests and no failures/errors/skips; 57 Python tests and dependency checks passed. Kafka Compose recreation/persistence and the fresh training-to-HTTP/tuned re-ranking/rollback smoke passed, the latter with development Kafka stopped. CI now runs the Compose smoke after the Java build.
 
 **Day 32 — Transactional outbox + publisher**
 - Add an `event_outbox` migration and write domain data plus the outbox record in one PostgreSQL transaction.
@@ -269,7 +280,7 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 **Day 34 — Streaming feature freshness + cache invalidation**
 - Project recent profile-view and invite counters separately from historical training snapshots. Count every distinct event in the configured event-time window, including admitted late arrivals; newer timestamps alone must not discard older valid events.
 - Consume connection events for targeted cache invalidation while preserving the existing synchronous invalidation as a correctness safeguard until Kafka reliability is demonstrated.
-- Reconcile streaming state from the nightly `FeatureComputationJob` so replay and recovery cannot create permanent drift.
+- Add manually invoked, finite reconciliation of recent projections from authoritative PostgreSQL event windows, reusing compatible snapshot computation without running the legacy in-place writer over managed/historical features. Nightly Airflow scheduling arrives on Day 43; M6 recovery must work without it.
 - Test late/out-of-order events, duplicate/replayed events, window expiry, versioned state replacement, broker downtime, and recovery; state and cache freshness must converge without contaminating historical labels.
 - Use aggregate sequences for state replacement and identity/window membership for additive counters. Retain event time and ingestion time; explicitly select the historical knowledge boundary during reconciliation/export.
 
@@ -278,11 +289,87 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 - Publish metrics for outbox and consumer lag, throughput, retry/dead-letter counts, processing latency, and projection freshness.
 - Document local operation, topic creation/retention, replay, dead-letter recovery, schema evolution, and failure-mode behavior.
 
+---
+
+## Week 7 — MLflow Experiment Tracking & Model Lifecycle (M7, planned)
+
+Build on Kafka's durable source/ingestion boundaries and the existing offline
+CLIs. MLflow records experiments and model versions; it does not replace ONNX
+Runtime Java or the Day 23 serving-release authority. See design section 7.3.
+
+**Day 36 — MLflow infrastructure + storage ownership**
+
+- Add an optional Compose profile with a pinned MLflow server/client compatibility set, health check, dedicated PostgreSQL database/role, and persistent artifact storage. Keep the base Day 30 startup usable without MLflow.
+- Use a durable local artifact volume for the laptop profile; document the shared S3-compatible storage configuration and test it before claiming remote-worker support. Separate tracking metadata from artifact bytes.
+- Keep PYMK Flyway migrations separate from MLflow-owned metadata upgrades. Restrict the UI/network and credentials; test restart persistence and an upgrade/backup plan before accepting the infrastructure.
+
+**Day 37 — Reproducible tracking for existing ML commands**
+
+- Add explicit tracking integration to profile-transform fitting, L1/L2 training, frozen evaluation and blend tuning without changing their numerical results or default CLI behavior.
+- Log code/build identity, dependency versions, seed, parameters, source/knowledge cutoffs, dataset/cohort/split hashes, release IDs, metrics and checksum-bound output references. Record failed runs and `not_met` gates; unavailable metrics remain unavailable, not zero.
+- Use stable logical experiment identities with linked retry attempts; keep raw member data and secrets out of parameters/tags. Test offline/untracked mode, resumed publication and tracking failure without silently reporting a fully published run.
+
+**Day 38 — Immutable artifacts + model registry contracts**
+
+- Register exact L1/L2 ONNX versions only after upload/read-back checksum and metadata/tensor/parity validation. Attach transform, dataset, evaluation and blend artifacts as lineage, not as independently interchangeable serving models.
+- Extend the release manifest with run IDs, registry name/version, artifact URI and digests while retaining all existing feature/embedding/model compatibility fields. Version the extension and keep existing Day 30 manifests usable.
+- Use aliases/tags for human discovery, not deprecated registry stages or live serving resolution. Test interrupted uploads, mismatched files, reused output versions and alias movement after staging; none may change the pinned candidate or active release.
+
+**Day 39 — Guarded promotion + model synchronization**
+
+- Implement the model-sync adapter that downloads an exact registered version to a staged immutable location and invokes existing validation/release preparation. No request handler calls MLflow.
+- Bind L1, optional L2, transforms/features, candidate budgets and blend configuration into one approved manifest. Require parity, temporal/cohort validity, coverage, declared quality and cold/warm latency gates plus explicit operator approval; successful training is not promotion.
+- Preserve PostgreSQL expected-epoch activation and cache isolation. L2/RERANK configuration is process-level today: verify a controlled rollout and matching rollback rather than claiming an alias flip updates running JVMs. Reject stale approvals or changed digests and prove L1 fallback.
+
+**Day 40 — MLflow failure recovery + lifecycle runbook**
+
+- Add integration coverage for tracking/artifact outages, duplicate retry publication, corrupted downloads, concurrent promotion attempts and missing rollback artifacts. Current valid serving must remain available; registry-dependent new promotion fails closed.
+- Demonstrate backup/restore of registry metadata plus artifact bytes, then reproduce a registered candidate and roll back a served release. Retention must preserve active, rollback and required evaluation lineage.
+- Document tracking, comparison, registration, approval, synchronization and recovery commands. Provide a deterministic local demo from an existing frozen dataset to a tracked candidate; a failed quality gate is a valid demo outcome, not permission to activate it.
+
+---
+
+## Week 8 — Airflow Orchestration & Batch Operations (M8, planned)
+
+Airflow schedules bounded workflows after Kafka and MLflow are established.
+Spring Batch still owns chunk transactions/checkpoints and the Python CLIs still
+own training/evaluation. No DAG consumes an unbounded Kafka stream or participates
+in a recommendation request. See design section 7.4.
+
+**Day 41 — Airflow infrastructure + workflow contracts**
+
+- Add an optional Linux-container Compose profile with pinned Airflow/provider versions, a bounded local executor, dedicated metadata database/role, persistent logs and health checks. Document Windows Docker Desktop/WSL2 setup and measured resource needs; keep Airflow dependencies isolated from the trainer environment.
+- Define thin DAGs in `orchestration/airflow/`, with UTC data intervals, explicit parameters, `catchup=False`, timeouts, retry budgets and resource pools. Choose and document the worker launch mechanism; ship the tested Java/Python runtime and artifact mounts, not an assumed host installation.
+- Keep Airflow metadata migrations under Airflow's tooling, not app Flyway. Test DAG imports/structure without live services or expensive work during parsing; keep service credentials outside DAG source.
+
+**Day 42 — Scheduled feature and ML workflows**
+
+- Orchestrate source validation → immutable embedding/feature staging → mature export → tracked L1/L2 training → frozen evaluation → validation-only blend tuning → candidate preparation. Use separate cadence/dependency paths; today's fresh snapshot must not be trained on before its label window matures.
+- Invoke existing Spring Batch jobs and Python CLIs through a tested adapter that waits for real completion, checks exit/execution status and validates outputs. Pass artifact references/checksums through XCom, never datasets or ONNX bytes.
+- Extend Day 23 managed-generation refreshes; never schedule the legacy in-place Day 17 writer against active managed features. Prove compatible model/feature coverage, failed refresh isolation and retained prior generations.
+
+**Day 43 — Kafka reconciliation + reproducible backfills**
+
+- Schedule finite reconciliation of streaming projections against PostgreSQL at declared event/ingestion watermarks, leaving continuous consumers in `pymk-event-stream`. Include window expiry, late arrivals, deduplication retention and DLT/replay runbook integration.
+- Require explicit historical source revisions, feature/knowledge cutoffs, label maturity and destination versions for backfills. Missing historical inputs fail validation; never substitute current profiles or overwrite published datasets. Backfills cannot activate a serving release automatically.
+- Bound normal and backfill concurrency separately, use shared resource pools and database fencing with manual invocations, and test replay convergence without contaminating historical exports. Add graph-index refresh only for the configured store, not an implicit Neo4j dependency.
+
+**Day 44 — Retry/restart identities + controlled release workflow**
+
+- Persist the mapping from logical work key (job, interval, source/config hashes and output version) to Spring Batch instance/executions, MLflow run/attempts and output manifest. Airflow task retries must resume or validate/reuse completed work, not create new timestamp-based jobs or overwrite artifacts.
+- Test a worker crash after job completion but before task acknowledgement, scheduler restart, timeout/cancellation and orphan-job reconciliation. Concurrent manual/scheduled work must share database locking/leases; Airflow pools alone are insufficient.
+- Connect approved candidates to M7 synchronization and expected-epoch activation. Verify approval is bound to exact manifest/epoch, block stale or incomplete candidates, and retain an operator-controlled deployment/rollback boundary for process-level L2/blend changes.
+
+**Day 45 — End-to-end orchestration resilience + runbook**
+
+- Run a deterministic full DAG on already mature fixtures and a separate fresh-data maturity rejection case; verify actual packaged HTTP recommendations after an approved compatible release and after rollback.
+- Test scheduler/worker/Kafka/MLflow/artifact-store outages, task retries, competing runs, restored metadata and retention cleanup. Prove no duplicate effects, no partially published release, and no serving dependency on Airflow availability.
+- Document schedules, pause/resume, explicit backfills, manual CLI recovery, alert ownership and recovery from each checkpoint. Schedule model-sync and offline-evaluation reporting; retain active/rollback artifacts and auditable lineage during cleanup. Publish failure/freshness/run-duration telemetry before M9's unified dashboards.
+
 ### Remaining post-Day-30 extensions
 
-- **M7 — Batch operations:** extend Day 23's generation/activation primitive to scheduled feature refreshes, retain prior generations, and invalidate matching result caches. Add scheduling/concurrency guards, restartability, Kafka reconciliation, and graph-index/model-sync/evaluation jobs. Test incomplete refreshes, competing schedulers, restored database state and retention cleanup; active and rollback-referenced artifacts must survive.
-- **M8 — Observability and quality:** bounded source deadlines/concurrency, per-stage timers/counters, separate liveness/readiness, and Prometheus/Grafana dashboards for cache errors, feature age/coverage, model versions, outbox/consumer lag, and DLT recovery. No member IDs in metric labels; test alerts and dependency outages. Exercise in-flight cache refill after mutation and fence stale writes before promising immediate coherence. Record query plans and exact-versus-ANN recall/latency at fixed resource and candidate budgets.
-- **M9 — Portfolio release:** one-command startup including Kafka, deterministic seed/model workflow, health plus actual recommendation smoke tests, immutable release manifests and tested rollback, latency/load evidence at a stated scale, and a reproducible baseline-vs-pipeline report. Exercise upgrade from the previous checkpoint, database backup/restore and artifact recovery after restart. Public deployment requires authentication/authorization, request limits, injected secrets, restricted admin endpoints, and a retention/deletion policy first; Kubernetes remains optional.
+- **M9 — Observability and quality:** bounded source deadlines/concurrency, per-stage timers/counters, separate liveness/readiness, and Prometheus/Grafana dashboards for cache errors, feature age/coverage, model versions, outbox/consumer lag, DLT recovery, MLflow publication/registration failures and Airflow task/run health. Correlate DAG/run/release IDs in logs and reports, not unbounded metric labels; never label metrics by member ID. Test alerts and dependency outages. Exercise in-flight cache refill after mutation and fence stale writes before promising immediate coherence. Record query plans and exact-versus-ANN recall/latency at fixed resource and candidate budgets.
+- **M10 — Portfolio release:** one-command startup with documented lightweight and full Kafka/MLflow/Airflow profiles, deterministic seed/model/DAG workflow, health plus actual recommendation smoke tests, immutable release manifests and tested rollback, latency/load evidence at a stated scale, and a reproducible baseline-vs-pipeline report. Exercise upgrade from the previous checkpoint, separate app/vendor metadata migrations, database backup/restore and artifact recovery after restart. Public deployment requires authentication/authorization, request limits, injected secrets, restricted admin/UI endpoints, and a retention/deletion policy first; Kubernetes remains optional.
 
 ---
 

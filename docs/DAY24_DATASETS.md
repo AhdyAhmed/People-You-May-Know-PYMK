@@ -106,7 +106,8 @@ ID**, output files and evaluation report. The previous archive remains unchanged
 the new label-source revision records that source state changed. Frozen features
 continue to describe the original release, not a silently rebuilt profile state.
 Historical mutable-profile reconstruction, ingestion-time lineage and continuous
-refresh/reconciliation remain M6/M7 work.
+refresh/reconciliation remain M6 Kafka / M8 Airflow-batch work (the expanded
+roadmap places MLflow in M7).
 
 ## Reproducible verification
 

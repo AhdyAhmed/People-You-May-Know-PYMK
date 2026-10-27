@@ -113,7 +113,8 @@ parameter set would otherwise identify an already-completed Spring Batch job.
 - Source revision triggers cover members, connections and events. They serialize
   writers through a revision row; SHARE locks cover each feature chunk, export
   and promotion validation. This conservative stable-data design has contention
-  costs and is not a high-throughput ingestion architecture. M6/M7 will extend it.
+  costs and is not a high-throughput ingestion architecture. M6 Kafka and M8
+  Airflow/batch operations will extend it (milestones renumbered for MLflow).
 - Activation requires the staged cohort to cover all live members and edges;
   older historical training releases normally cannot be activated. Historical
   profile reconstruction and ingestion-time provenance are not implemented.
@@ -131,7 +132,7 @@ parameter set would otherwise identify an already-completed Spring Batch job.
   available for rollback; do not mutate them if you need that exact baseline.
 - Model inference/eviction is synchronized with at most two ONNX sessions.
   This bounds resources and prevents close-during-inference races, but throughput
-  and the target p99 latency still require M8 measurement.
+  and the target p99 latency still require M9 observability/load measurement.
 - No automatic scheduling or garbage collection yet. Retain active, historical
   training and rollback generations, registry rows and artifacts. Database backups
   must include all V7 tables. The destructive seed reset explicitly resets the

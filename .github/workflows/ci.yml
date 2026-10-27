@@ -22,6 +22,10 @@ jobs:
       - name: Build all modules
         run: mvn -B -ntp verify
 
+      - name: Verify Kafka Compose listeners and persistence
+        shell: pwsh
+        run: ./scripts/day31-kafka-smoke.ps1
+
   ml-training:
     runs-on: ubuntu-latest
     steps:

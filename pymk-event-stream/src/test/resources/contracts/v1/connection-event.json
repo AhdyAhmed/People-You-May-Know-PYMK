@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "eventId": "2c1599c0-e68a-44ae-bd8f-d69b17066424",
+  "eventType": "CONNECTION_CREATED",
+  "occurredAt": "2026-01-01T12:00:00Z",
+  "ingestedAt": "2026-01-01T12:00:00Z",
+  "subjectMemberId": 42,
+  "targetMemberId": 100,
+  "correlationId": "7c869a89-1317-453c-8b67-560261016538",
+  "payload": {"aggregateSequence": 1}
+}

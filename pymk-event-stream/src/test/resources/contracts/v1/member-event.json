@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "eventId": "1fdf16fa-e0b9-4d38-8c97-182b247c4eae",
+  "eventType": "PROFILE_VIEW",
+  "occurredAt": "2026-01-01T12:00:00Z",
+  "ingestedAt": "2026-01-01T12:01:00Z",
+  "subjectMemberId": 42,
+  "targetMemberId": 100,
+  "correlationId": "7c869a89-1317-453c-8b67-560261016538",
+  "payload": {}
+}

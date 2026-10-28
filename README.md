@@ -6,10 +6,10 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 31 complete (M1–M5 complete; M6 in progress).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 32 complete (M1–M5 complete; M6 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
-> Kafka development infrastructure and versioned event contracts are implemented.
-> Next: transactional outbox/event ingestion (Day 32), then consumers/projections (Days 33–35).
+> Kafka infrastructure, versioned contracts, durable event ingestion and transactional outbox publishing are implemented.
+> Next: idempotent consumers and failure handling (Day 33), then projections/resilience (Days 34–35).
 > MLflow (M7, Days 36–40), Airflow (M8, Days 41–45), observability and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 31 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 32 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -155,7 +155,7 @@ API, so it should not be exposed publicly as-is.
 ```
 pymk/
 ├── pymk-common/            # shared DTOs, enums, utils
-├── pymk-event-stream/      # v1 Kafka contracts and topology; outbox/consumers follow on Days 32–35
+├── pymk-event-stream/      # v1 Kafka contracts/topology used by the API outbox; consumers planned
 ├── pymk-domain/            # JPA entities, repositories
 ├── pymk-feature-store/     # feature computation + read/write API
 ├── pymk-candidate-gen/     # L0: graph, EBR, heuristic candidate sources
@@ -172,8 +172,8 @@ pymk/
 ```
 
 All listed Java modules and the Python trainer have implemented content through
-Day 31. `pymk-event-stream` is a standalone contract library, intentionally not an
-API dependency yet; application event publishing and consumption remain future work.
+Day 32. `pymk-event-stream` supplies the frozen contracts used by the API's durable
+ingestion/outbox publisher. Application consumers and projections remain future work.
 
 ### Day 31 Kafka development profile
 
@@ -189,6 +189,19 @@ in a named volume. The broker is local/plaintext/single-node, not a production H
 deployment. Kafka remains outside the recommendation request path. See the
 [Day 31 runbook](docs/DAY31_KAFKA_CONTRACTS.md) for contracts, replay/retention,
 duplicate identity, security boundaries, testing and cleanup.
+
+### Day 32 event ingestion and outbox
+
+`POST /api/v1/events` returns a durable 202 receipt after committing the member
+event and outbox together. Identical retries return the original receipt; changed
+content under the same event ID returns 409. Connection mutations emit their own
+domain event without creating a training label.
+
+Set `PYMK_OUTBOX_RELAY_ENABLED=true` to enable asynchronous Kafka publishing after
+initializing the topics above. It is disabled by default; accepted events remain
+queued without a broker. The bounded backlog rejects new mutations with 503 when
+full, never discarding accepted rows. See the [Day 32 runbook](docs/DAY32_EVENT_OUTBOX.md)
+for JSON examples, configuration, ordering, recovery and verification.
 
 ## Data model & how to seed the DB
 
@@ -272,7 +285,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M6 - Day 31: Kafka infrastructure and versioned event contracts","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M6 - Day 32: Durable event ingestion and transactional outbox","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -390,8 +403,9 @@ and its first-degree connection count:
 }
 ```
 
-`POST /api/v1/connections` stores both directions of the undirected graph edge;
-event ingestion is a separate future endpoint. It returns
+`POST /api/v1/connections` stores both directions of the undirected graph edge
+and a connection-domain outbox event; member-event ingestion is available separately
+at `POST /api/v1/events`. The connection endpoint returns
 `201` with `created: true` for a new connection and `200` with `created: false` when
 the pair is already connected. Validation and domain failures use RFC 9457
 `application/problem+json` responses. The live OpenAPI document is available at
@@ -658,7 +672,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
       cohort/artifact hashes, immutable Spring configuration and a packaged HTTP
       deployment/rollback demo. See the [Day 30 runbook](docs/DAY30_BLEND_TUNING.md).
 - [x] **Day 31 — Kafka infrastructure and contracts**: optional persistent KRaft broker, checked topic initialization, strict versioned JSON Schemas, immutable envelopes, stable keys/identity comparison and real-broker tests. See the [Day 31 runbook](docs/DAY31_KAFKA_CONTRACTS.md).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. The implemented checkpoint is Day 31; Day 32 is next.
+- [x] **Day 32 — Durable event ingestion and outbox**: atomic receipts/domain writes, bounded admission, connection domain events and leased acknowledged Kafka publishing with crash/retry coverage. See the [Day 32 runbook](docs/DAY32_EVENT_OUTBOX.md).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. The implemented checkpoint is Day 32; Day 33 is next.
 
 ## License
 

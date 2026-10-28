@@ -4,6 +4,7 @@ import com.ahdyahmed.pymk.api.dto.ConnectionResponse;
 import com.ahdyahmed.pymk.api.dto.CreateConnectionRequest;
 import com.ahdyahmed.pymk.api.error.InvalidConnectionException;
 import com.ahdyahmed.pymk.api.error.MemberNotFoundException;
+import com.ahdyahmed.pymk.api.events.EventIngestionService;
 import com.ahdyahmed.pymk.domain.repository.MemberRepository;
 import com.ahdyahmed.pymk.domain.service.ConnectionService;
 import com.ahdyahmed.pymk.orchestrator.RecommendationCacheInvalidator;
@@ -26,20 +27,23 @@ public class ConnectionRequestService {
     private final ConnectionService connectionService;
     private final RecommendationCacheInvalidator cacheInvalidator;
     private final Clock clock;
+    private final EventIngestionService events;
 
     public ConnectionRequestService(
             MemberRepository members,
             ConnectionService connectionService,
             RecommendationCacheInvalidator cacheInvalidator,
-            Clock clock) {
+            Clock clock, EventIngestionService events) {
         this.members = members;
         this.connectionService = connectionService;
         this.cacheInvalidator = cacheInvalidator;
         this.clock = clock;
+        this.events = events;
     }
 
     @Transactional
     public ConnectionResponse connect(CreateConnectionRequest request) {
+        events.lockAdmission();
         long a = request.memberId();
         long b = request.connectedMemberId();
 
@@ -54,8 +58,10 @@ public class ConnectionRequestService {
         }
 
         Set<Long> affectedMembers = cacheInvalidator.affectedByConnection(a, b);
-        boolean created = connectionService.connect(a, b, Instant.now(clock));
+        Instant connectedAt = Instant.now(clock);
+        boolean created = connectionService.connect(a, b, connectedAt);
         if (created) {
+            events.connectionCreated(a, b, connectedAt);
             cacheInvalidator.evictAfterCommit(affectedMembers);
         }
         return new ConnectionResponse(a, b, created);

@@ -16,7 +16,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M6 - Day 31: Kafka infrastructure and versioned event contracts",
+                "milestone", "M6 - Day 32: Durable event ingestion and transactional outbox",
                 "scorer", pipeline.mode()
         );
     }

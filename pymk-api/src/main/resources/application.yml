@@ -29,6 +29,16 @@ spring:
       timeout: 1s
 
 pymk:
+  events:
+    max-pending: ${PYMK_EVENTS_MAX_PENDING:100000}
+    future-skew-seconds: 300
+    relay:
+      enabled: ${PYMK_OUTBOX_RELAY_ENABLED:false}
+      bootstrap-servers: ${PYMK_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      batch-size: 50
+      lease-seconds: 60
+      retry-seconds: 5
+      poll-ms: 1000
   serving:
     # Explicit opt-in after evaluation; L1 is the safe rollback mode.
     ranker: ${PYMK_SERVING_RANKER:L1}

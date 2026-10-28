@@ -1,6 +1,7 @@
 package com.ahdyahmed.pymk.api.error;
 
 import com.ahdyahmed.pymk.orchestrator.RecommendationGenerationException;
+import com.ahdyahmed.pymk.api.events.EventFailure;
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +28,13 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(EventFailure.class)
+    ResponseEntity<ProblemDetail> handleEvent(EventFailure ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(ex.status()), ex.getMessage());
+        var response = ResponseEntity.status(ex.status());
+        if (ex.status() == 503) response.header("Retry-After", "5");
+        return response.body(problem);
+    }
 
     private static final String ERROR_TYPE_BASE = "https://github.com/AhdyAhmed/People-You-May-Know-PYMK/errors/";
 

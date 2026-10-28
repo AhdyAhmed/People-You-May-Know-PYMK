@@ -33,6 +33,11 @@ public class BulkLoader {
 
     @org.springframework.transaction.annotation.Transactional
     public void truncateAll() {
+        jdbc.queryForObject("SELECT pg_advisory_xact_lock(320032)", Object.class);
+        if (Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM event_outbox WHERE published_at IS NULL)", Boolean.class))) {
+            throw new IllegalStateException("Refusing dataset reset while accepted outbox events are unpublished");
+        }
         jdbc.queryForObject("SELECT pg_advisory_xact_lock(230023)", Object.class);
         Long epoch = jdbc.queryForObject("SELECT epoch FROM pymk_active_release", Long.class);
         log.info("Truncating pymk_features, member_events, connections, member_embeddings, members ...");

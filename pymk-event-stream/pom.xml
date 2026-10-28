@@ -11,7 +11,7 @@
   </parent>
   <artifactId>pymk-event-stream</artifactId>
   <name>pymk-event-stream</name>
-  <description>Versioned Kafka wire contracts; outbox and consumers follow on Days 32-35.</description>
+  <description>Versioned Kafka wire contracts used by the API outbox; consumers follow on Days 33-35.</description>
   <dependencies>
     <dependency>
       <groupId>org.springframework.kafka</groupId>

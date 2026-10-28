@@ -1,4 +1,4 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox)
 if ($IncludeBlendTuning) { $IncludeReranker = $true }
 if ($IncludeReranker) { $IncludeL2Serving = $true }
 if ($IncludeL2Serving) { $IncludeEvaluation = $true }
@@ -12,15 +12,21 @@ $output = (New-Item -ItemType Directory -Path "$root/artifacts/day23-smoke/$run"
 $pg = $null
 $redis = $null
 $api = $null
+$outboxKafkaStarted = $false
+$previousKafkaPort = $env:PYMK_KAFKA_PORT
 $step = 0
 $apiBoot = 0
 function StartSmokeApi([string]$mode) {
+    $script:lastMode = $mode
     if ($script:api -and -not $script:api.HasExited) {
         Stop-Process -Id $script:api.Id
         if (-not $script:api.WaitForExit(10000)) { throw 'Previous API process did not stop' }
     }
     $script:apiBoot++
     $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
+    if ($IncludeOutbox) {
+        $apiArgs += @('--pymk.events.relay.enabled=true', "--pymk.events.relay.bootstrap-servers=localhost:$kafkaPort")
+    } else { $apiArgs += '--pymk.events.relay.enabled=false' }
     if ($mode -eq 'RERANK' -and $IncludeBlendTuning) {
         $configPath = "$output/blend/application-blend.properties" -replace '\\','/'
         $apiArgs += "--spring.config.additional-location=file:$configPath"
@@ -68,6 +74,19 @@ function CheckResponse {
 }
 Push-Location $root
 try {
+    if ($IncludeOutbox) {
+        $kafkaProject = "pymk-day32-$run"
+        if ($kafkaProject -notmatch '^pymk-day32-[a-f0-9]{10}$') { throw 'Invalid isolated Kafka project' }
+        $kafkaListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $kafkaListener.Start()
+        $kafkaPort = $kafkaListener.LocalEndpoint.Port
+        $kafkaListener.Stop()
+        $env:PYMK_KAFKA_PORT = [string]$kafkaPort
+        $kafkaCompose = @('compose', '-p', $kafkaProject, '-f', "$root/infra/docker-compose.yml", '--profile', 'kafka')
+        $outboxKafkaStarted = $true
+        Checked 'docker' ($kafkaCompose + @('up', '-d', '--wait', '--wait-timeout', '120', 'kafka'))
+        Checked 'docker' ($kafkaCompose + @('run', '--rm', 'kafka-init'))
+    }
     $batchJar = (Get-Item "$root/pymk-batch/target/pymk-batch.jar").FullName
     $apiJar = (Get-Item "$root/pymk-api/target/pymk-api.jar").FullName
     if (-not $batchJar -or -not $apiJar) { throw 'Run mvn verify first' }
@@ -210,11 +229,58 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
             Write-Host 'PASS: Day 30 tuned configuration loaded by the actual diversified HTTP endpoint, rollback and re-enable'
         }
     }
+    if ($IncludeOutbox) {
+        Checked 'docker' ($kafkaCompose + @('stop', 'kafka'))
+        $eventId = [guid]::NewGuid().ToString()
+        $eventBody = @{
+            schemaVersion = 1; eventId = $eventId; eventType = 'PROFILE_VIEW'
+            occurredAt = '2026-10-09T12:00:00Z'; subjectMemberId = 1; targetMemberId = 2
+            correlationId = [guid]::NewGuid().ToString(); payload = @{}
+        } | ConvertTo-Json -Compress
+        $accepted = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/events" -Method Post -ContentType 'application/json' -Body $eventBody
+        if ([int]$accepted.StatusCode -ne 202) { throw 'Event was not durably accepted during broker outage' }
+        $receipt = $accepted.Content
+        $retry = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/events" -Method Post -ContentType 'application/json' -Body $eventBody
+        if ($retry.Content -ne $receipt) { throw 'Duplicate event changed its receipt' }
+        for ($i = 0; $i -lt 45; $i++) {
+            if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NULL AND attempts > 0') -eq '1') { break }
+            Start-Sleep -Seconds 1
+        }
+        if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NULL AND attempts > 0') -ne '1') {
+            throw 'Outage did not retain the failed publish for retry'
+        }
+        $readDuringOutage = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/pymk/1?limit=2"
+        if ([int]$readDuringOutage.StatusCode -ne 200) { throw 'Broker outage broke recommendation reads' }
+        $connection = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/connections" -Method Post -ContentType 'application/json' -Body '{"memberId":3,"connectedMemberId":4}'
+        if ([int]$connection.StatusCode -ne 201) { throw 'Connection did not commit during broker outage' }
+        Checked 'docker' ($kafkaCompose + @('up', '-d', '--wait', '--wait-timeout', '120', 'kafka'))
+        for ($i = 0; $i -lt 60; $i++) {
+            if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NOT NULL') -eq '2') { break }
+            Start-Sleep -Seconds 1
+        }
+        if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NOT NULL') -ne '2') { throw 'Relay failed to drain after broker recovery' }
+        $wire = & docker @kafkaCompose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:19092 --topic pymk.member-events.v1 --from-beginning --max-messages 1 --timeout-ms 20000 2> "$output/outbox-consumer.log"
+        if ($LASTEXITCODE -ne 0 -or ($wire | ConvertFrom-Json).eventId -ne $eventId) { throw 'Kafka record identity mismatch' }
+        StartSmokeApi $lastMode
+        $afterRestart = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/events" -Method Post -ContentType 'application/json' -Body $eventBody
+        if ($afterRestart.Content -ne $receipt -or (Sql 'SELECT count(*) FROM event_outbox') -ne '2') {
+            throw 'Process restart lost receipt identity'
+        }
+        Write-Host 'PASS: Day 32 actual HTTP acceptance through broker outage, scheduled relay recovery, Kafka identity and durable receipt after API restart'
+    }
     Write-Host "PASS: real training, activation, database-model startup, HTTP probabilities, caching and two rollbacks. Evidence: $output"
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id }
     # Only the two uniquely named containers created by this invocation are removed.
     if ($redis) { & docker stop $redis | Out-Null }
     if ($pg) { & docker stop $pg | Out-Null }
+    if ($outboxKafkaStarted) {
+        & docker @kafkaCompose logs --no-color kafka *> "$output/outbox-broker.log"
+        # Only this invocation's validated GUID project and its disposable volume.
+        & docker @kafkaCompose down --volumes
+        $kafkaCleanupExit = $LASTEXITCODE
+    }
+    $env:PYMK_KAFKA_PORT = $previousKafkaPort
     Pop-Location
+    if ($outboxKafkaStarted -and $kafkaCleanupExit -ne 0) { throw 'Isolated Kafka cleanup failed' }
 }

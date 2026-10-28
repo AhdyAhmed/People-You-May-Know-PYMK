@@ -4,13 +4,13 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 31 complete (M1–M5 complete; M6 in progress).
-Day 32 / transactional outbox and event ingestion is next. The Kafka library
-and broker do not yet publish or consume application mutations.
+**Current checkpoint:** Day 32 complete (M1–M5 complete; M6 in progress).
+Durable ingestion and transactional outbox publishing are implemented. Day 33 /
+idempotent consumers and failure handling is next; streaming projections are not implemented.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow and Airflow are not implemented at the Day 31 checkpoint.
+release (M10). MLflow and Airflow are not implemented at the Day 32 checkpoint.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -19,7 +19,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–31 are the implementation record. Unchecked future days below
+Completed Days 1–32 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -264,12 +264,15 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 - Added real-broker Spring Kafka publish/consume, per-key ordering, independent-group replay/committed-offset tests and a separate Compose smoke covering host listeners and persistence through broker recreation. The API remains Kafka-independent; durable receipts/outbox and consumer effects are still Days 32–35. See [Day 31 runbook](DAY31_KAFKA_CONTRACTS.md).
 - Verified 2026-10-09: all 13 reactor projects succeeded with 212 Java tests and no failures/errors/skips; 57 Python tests and dependency checks passed. Kafka Compose recreation/persistence and the fresh training-to-HTTP/tuned re-ranking/rollback smoke passed, the latter with development Kafka stopped. CI now runs the Compose smoke after the Java build.
 
-**Day 32 — Transactional outbox + publisher**
-- Add an `event_outbox` migration and write domain data plus the outbox record in one PostgreSQL transaction.
-- Implement a restart-safe relay that publishes with broker acknowledgements, records publication state, and safely retries without losing events.
-- Claim bounded batches with recoverable leases and preserve aggregate-key order. Test a crash after broker acknowledgement but before the published marker; redelivery must retain the original event ID.
-- Add event ingestion with the database/outbox transaction and the documented `202` response; connection mutations publish their own domain event without inventing an acceptance label.
-- Validate type-specific payloads/member references and clock-skew bounds. Identical event-ID retries return the original receipt; conflicting content returns `409`. Define backlog/admission limits and retain every already-accepted unpublished event during broker outages.
+**Day 32 — Transactional outbox + publisher ✅**
+- Added forward-only V9 outbox/aggregate-sequence migration. Member events and connection mutations commit with their outbox record in one PostgreSQL transaction.
+- Implemented an opt-in scheduled relay with acknowledged, idempotent Kafka producer, bounded head-of-key claims, recoverable leases, stale-owner checks and retained retries. No broker calls occur on the request path.
+- Added strict bounded `POST /api/v1/events` ingestion with durable `202` receipts, valid member references, five-minute future skew, late-event support, identical receipt retries and `409` content conflicts.
+- Connection API emits canonical, sequenced `CONNECTION_CREATED` only for actual graph changes; no fabricated acceptance label. Existing synchronous cache invalidation remains.
+- Serialized admission enforces a configurable pending-row limit; full backlog returns retryable 503 without discarding accepted data. Development reset refuses to erase data with pending events.
+- Added PostgreSQL/Kafka integration coverage for concurrent identity/admission, rollback, per-key blocking, lease recovery, stale owners, broker failure/recovery and crash-after-ack-before-marker replay. See [Day 32 runbook](DAY32_EVENT_OUTBOX.md) for operating limits and at-least-once semantics.
+- Verified 2026-10-09: all 13 reactor projects and 229 Java tests passed with zero failures/errors/skips; all 57 Python tests and dependency checks passed.
+- Verified 2026-10-10: the packaged outbox smoke passed real HTTP acceptance through Kafka outage, scheduled recovery, wire identity and original receipt after API restart, alongside fresh training/serving/cache/rollback checks. The separate Kafka Compose persistence smoke also passed.
 
 **Day 33 — Idempotent consumers + failure handling**
 - Consume with at-least-once delivery; projection updates and `(consumerName, eventId)` idempotency records commit in one database transaction before offsets are acknowledged.

@@ -1,5 +1,9 @@
 # Day 31 — Kafka infrastructure and versioned contracts
 
+This is the historical Day 31 checkpoint. Day 32 now implements API ingestion
+and outbox publishing; see [the current publisher runbook](DAY32_EVENT_OUTBOX.md).
+The broker setup and frozen v1 contracts below remain applicable.
+
 Day 31 adds a runnable, optional development broker and the `pymk-event-stream`
 Java library. It does **not** publish application mutations yet. The transactional
 outbox/event-ingestion endpoint starts on Day 32; durable consumer deduplication,

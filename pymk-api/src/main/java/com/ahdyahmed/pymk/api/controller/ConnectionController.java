@@ -43,6 +43,9 @@ public class ConnectionController {
     @ApiResponse(responseCode = "409", description = "Concurrent request created the same connection first",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(responseCode = "503", description = "Event backlog full; no connection was committed",
+            content = @Content(mediaType = "application/problem+json",
+                    schema = @Schema(implementation = ProblemDetail.class)))
     public ResponseEntity<ConnectionResponse> connect(@Valid @RequestBody CreateConnectionRequest request) {
         ConnectionResponse response = service.connect(request);
         return ResponseEntity.status(response.created() ? HttpStatus.CREATED : HttpStatus.OK).body(response);

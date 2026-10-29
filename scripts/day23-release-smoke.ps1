@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox, [switch]$IncludeConsumers)
+if ($IncludeConsumers) { $IncludeOutbox = $true }
 if ($IncludeBlendTuning) { $IncludeReranker = $true }
 if ($IncludeReranker) { $IncludeL2Serving = $true }
 if ($IncludeL2Serving) { $IncludeEvaluation = $true }
@@ -27,6 +28,9 @@ function StartSmokeApi([string]$mode) {
     if ($IncludeOutbox) {
         $apiArgs += @('--pymk.events.relay.enabled=true', "--pymk.events.relay.bootstrap-servers=localhost:$kafkaPort")
     } else { $apiArgs += '--pymk.events.relay.enabled=false' }
+    if ($IncludeConsumers) {
+        $apiArgs += @('--pymk.events.consumers.enabled=true', "--pymk.events.consumers.bootstrap-servers=localhost:$kafkaPort")
+    } else { $apiArgs += '--pymk.events.consumers.enabled=false' }
     if ($mode -eq 'RERANK' -and $IncludeBlendTuning) {
         $configPath = "$output/blend/application-blend.properties" -replace '\\','/'
         $apiArgs += "--spring.config.additional-location=file:$configPath"
@@ -234,7 +238,7 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         $eventId = [guid]::NewGuid().ToString()
         $eventBody = @{
             schemaVersion = 1; eventId = $eventId; eventType = 'PROFILE_VIEW'
-            occurredAt = '2026-10-09T12:00:00Z'; subjectMemberId = 1; targetMemberId = 2
+            occurredAt = [DateTime]::UtcNow.ToString('o'); subjectMemberId = 1; targetMemberId = 2
             correlationId = [guid]::NewGuid().ToString(); payload = @{}
         } | ConvertTo-Json -Compress
         $accepted = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/events" -Method Post -ContentType 'application/json' -Body $eventBody
@@ -261,10 +265,22 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NOT NULL') -ne '2') { throw 'Relay failed to drain after broker recovery' }
         $wire = & docker @kafkaCompose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:19092 --topic pymk.member-events.v1 --from-beginning --max-messages 1 --timeout-ms 20000 2> "$output/outbox-consumer.log"
         if ($LASTEXITCODE -ne 0 -or ($wire | ConvertFrom-Json).eventId -ne $eventId) { throw 'Kafka record identity mismatch' }
+        if ($IncludeConsumers) {
+            for ($i = 0; $i -lt 60; $i++) {
+                if ((Sql 'SELECT count(*) FROM event_consumer_journal') -eq '4') { break }
+                Start-Sleep -Seconds 1
+            }
+            if ((Sql 'SELECT count(*) FROM event_consumer_journal') -ne '4') { throw 'Both consumers did not commit both events' }
+            if ((Sql 'SELECT count(*) FROM event_consumer_receipt') -ne '4') { throw 'Receipt/journal transaction mismatch' }
+        }
         StartSmokeApi $lastMode
         $afterRestart = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/events" -Method Post -ContentType 'application/json' -Body $eventBody
         if ($afterRestart.Content -ne $receipt -or (Sql 'SELECT count(*) FROM event_outbox') -ne '2') {
             throw 'Process restart lost receipt identity'
+        }
+        if ($IncludeConsumers) {
+            if ((Sql 'SELECT count(*) FROM event_consumer_journal') -ne '4') { throw 'Restart duplicated consumer effects' }
+            Write-Host 'PASS: Day 33 packaged HTTP/outbox/Kafka pipeline committed once per independent consumer and survived API restart'
         }
         Write-Host 'PASS: Day 32 actual HTTP acceptance through broker outage, scheduled relay recovery, Kafka identity and durable receipt after API restart'
     }

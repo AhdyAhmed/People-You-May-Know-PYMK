@@ -30,6 +30,9 @@ spring:
 
 pymk:
   events:
+    consumers:
+      enabled: ${PYMK_EVENT_CONSUMERS_ENABLED:false}
+      bootstrap-servers: ${PYMK_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     max-pending: ${PYMK_EVENTS_MAX_PENDING:100000}
     future-skew-seconds: 300
     relay:

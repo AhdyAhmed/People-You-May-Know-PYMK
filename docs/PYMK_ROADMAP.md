@@ -4,13 +4,13 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 32 complete (M1–M5 complete; M6 in progress).
-Durable ingestion and transactional outbox publishing are implemented. Day 33 /
-idempotent consumers and failure handling is next; streaming projections are not implemented.
+**Current checkpoint:** Day 33 complete (M1–M5 complete; M6 in progress).
+Durable ingestion/outbox, idempotent journal consumers and DLT recovery are implemented.
+Day 34 / live streaming feature projections and cache invalidation is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow and Airflow are not implemented at the Day 32 checkpoint.
+release (M10). MLflow and Airflow are not implemented at the Day 33 checkpoint.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -19,7 +19,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–32 are the implementation record. Unchecked future days below
+Completed Days 1–33 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -27,7 +27,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–31 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–33 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -274,13 +274,17 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 - Verified 2026-10-09: all 13 reactor projects and 229 Java tests passed with zero failures/errors/skips; all 57 Python tests and dependency checks passed.
 - Verified 2026-10-10: the packaged outbox smoke passed real HTTP acceptance through Kafka outage, scheduled recovery, wire identity and original receipt after API restart, alongside fresh training/serving/cache/rollback checks. The separate Kafka Compose persistence smoke also passed.
 
-**Day 33 — Idempotent consumers + failure handling**
-- Consume with at-least-once delivery; projection updates and `(consumerName, eventId)` idempotency records commit in one database transaction before offsets are acknowledged.
-- Add bounded exponential-backoff retries and versioned dead-letter topics that retain original record metadata and the failure reason.
-- Define retry ordering explicitly and replay with the original identity. Test duplicate deliveries, conflicting content, crash windows, two independent consumer groups, and DLT recovery; database effects must not be applied twice.
-- Require acknowledged DLT publication before advancing past a poison record. Test DLT publication failure and replay beyond retention; extend deduplication retention or rebuild a fresh projection rather than double-applying old effects.
+**Day 33 — Idempotent consumers + failure handling ✅**
+- Added V10 receipts, normalized journal projection and persisted replay floors. Both opt-in consumer groups commit receipt and journal together before synchronous record-offset acknowledgement. Live feature/cache effects remain Day 34.
+- Added three bounded exponential retries and versioned 30-day DLTs with original bytes, metadata and safe failure categories. DLT capacity includes headroom for recovery headers on near-limit poison records.
+- Implemented independent group deduplication, content-conflict quarantine, transaction rollback and safe post-commit redelivery. Blocking retry does not let later records bypass a poison record until processing or DLT recovery succeeds.
+- Require a broker-acknowledged DLT send before advancing the source offset; DLT failures retain the source record and restart bounded backoff. Replay after recovery may be out of order and retains the original identity.
+- Retain deduplication history indefinitely by default. A persisted ingestion-time floor rejects unknown replay outside the supported history; known identical receipts remain no-ops. Added a finite single-offset replay CLI that never rewrites IDs or resets groups.
+- Added real PostgreSQL/Kafka tests for both source types, API/outbox-to-consumer flow, duplicate/conflicting/concurrent identities, crash windows, independent groups, DLT outage/recovery, near-limit poison, executable replay and retention boundaries. See [Day 33 runbook](DAY33_EVENT_CONSUMERS.md).
+- Verified 2026-10-11: all 13 reactor projects and 248 Java tests passed with zero failures/errors/skips; 57 Python tests and dependency validation passed. Kafka Compose persistence and the packaged HTTP/outbox/consumer smoke passed, including broker recovery, API restart, caching and two serving rollbacks. Evidence paths are recorded in the runbook.
 
 **Day 34 — Streaming feature freshness + cache invalidation**
+- Bootstrap/version live projections from the Day 33 journal before activation. Do not delete or reuse old receipts to force newly added side effects; already-processed events need an explicit backfill or new projection generation.
 - Project recent profile-view and invite counters separately from historical training snapshots. Count every distinct event in the configured event-time window, including admitted late arrivals; newer timestamps alone must not discard older valid events.
 - Consume connection events for targeted cache invalidation while preserving the existing synchronous invalidation as a correctness safeguard until Kafka reliability is demonstrated.
 - Add manually invoked, finite reconciliation of recent projections from authoritative PostgreSQL event windows, reusing compatible snapshot computation without running the legacy in-place writer over managed/historical features. Nightly Airflow scheduling arrives on Day 43; M6 recovery must work without it.

@@ -19,12 +19,14 @@ class OutboxMigrationTest {
             jdbc.update("INSERT INTO members(id, full_name) VALUES (1, 'A'), (2, 'B')");
             jdbc.update("INSERT INTO member_events(actor_member_id, target_member_id, type) VALUES (1, 2, 'PROFILE_VIEW')");
             Long revision = jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class);
+            assertThat(Flyway.configure().dataSource(source).target("9").load().migrate().migrationsExecuted).isEqualTo(1);
             var flyway = Flyway.configure().dataSource(source).load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM member_events", Long.class)).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM event_outbox", Long.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM event_consumer_policy", Long.class)).isEqualTo(2);
             assertThat(jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class)).isEqualTo(revision);
         }
     }

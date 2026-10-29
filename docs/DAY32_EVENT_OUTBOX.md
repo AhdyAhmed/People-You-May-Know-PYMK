@@ -1,5 +1,9 @@
 # Day 32 — Durable event ingestion and outbox publishing
 
+This records the Day 32 checkpoint. Day 33 now adds durable journal consumers and
+DLT recovery; see [the consumer runbook](DAY33_EVENT_CONSUMERS.md). Publisher
+configuration and guarantees below remain applicable.
+
 ## Implemented boundary
 
 The API commits domain writes and a V9 `event_outbox` row in one PostgreSQL

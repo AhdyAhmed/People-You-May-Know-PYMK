@@ -4,13 +4,14 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 33 complete (M1–M5 complete; M6 in progress).
-Durable ingestion/outbox, idempotent journal consumers and DLT recovery are implemented.
-Day 34 / live streaming feature projections and cache invalidation is next.
+**Current checkpoint:** Day 34 complete (M1–M5 complete; M6 in progress).
+Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
+targeted cache epochs and finite reconciliation are implemented and verified.
+Day 35 / Kafka resilience and observability is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow and Airflow are not implemented at the Day 33 checkpoint.
+release (M10). MLflow and Airflow are not implemented at the Day 34 checkpoint.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -19,7 +20,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–33 are the implementation record. Unchecked future days below
+Completed Days 1–34 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -27,7 +28,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–33 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–34 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -283,13 +284,14 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 - Added real PostgreSQL/Kafka tests for both source types, API/outbox-to-consumer flow, duplicate/conflicting/concurrent identities, crash windows, independent groups, DLT outage/recovery, near-limit poison, executable replay and retention boundaries. See [Day 33 runbook](DAY33_EVENT_CONSUMERS.md).
 - Verified 2026-10-11: all 13 reactor projects and 248 Java tests passed with zero failures/errors/skips; 57 Python tests and dependency validation passed. Kafka Compose persistence and the packaged HTTP/outbox/consumer smoke passed, including broker recovery, API restart, caching and two serving rollbacks. Evidence paths are recorded in the runbook.
 
-**Day 34 — Streaming feature freshness + cache invalidation**
-- Bootstrap/version live projections from the Day 33 journal before activation. Do not delete or reuse old receipts to force newly added side effects; already-processed events need an explicit backfill or new projection generation.
-- Project recent profile-view and invite counters separately from historical training snapshots. Count every distinct event in the configured event-time window, including admitted late arrivals; newer timestamps alone must not discard older valid events.
-- Consume connection events for targeted cache invalidation while preserving the existing synchronous invalidation as a correctness safeguard until Kafka reliability is demonstrated.
-- Add manually invoked, finite reconciliation of recent projections from authoritative PostgreSQL event windows, reusing compatible snapshot computation without running the legacy in-place writer over managed/historical features. Nightly Airflow scheduling arrives on Day 43; M6 recovery must work without it.
-- Test late/out-of-order events, duplicate/replayed events, window expiry, versioned state replacement, broker downtime, and recovery; state and cache freshness must converge without contaminating historical labels.
-- Use aggregate sequences for state replacement and identity/window membership for additive counters. Retain event time and ingestion time; explicitly select the historical knowledge boundary during reconciliation/export.
+**Day 34 — Streaming feature freshness + cache invalidation ✅**
+- Implemented V11 bootstrap from Day 33 journals into versioned live event membership and sequence-aware connection state. Receipts remain intact; journal-triggered projections commit in the receipt transaction.
+- Added directional profile-view/invite counters with configurable event-time windows, late-arrival admission, read-time expiry and explicit ingestion cutoffs. Exposed a live HTTP read endpoint without modifying historical model features or labels.
+- Added targeted durable cache epochs for connection endpoints and two-hop neighborhoods, with sequence checks and request-pinned cache namespaces. Existing synchronous invalidation and source revision checks remain safeguards; Redis availability is not required to commit an invalidation.
+- Added finite `liveFeatureReconciliationJob`: explicit event/knowledge boundaries, retained journal/outbox repair (including unpublished events), atomic generation replacement, concurrent-delivery fencing and sequence-safe invalidation recovery. No legacy in-place feature writer or scheduler dependency; Airflow scheduling remains Day 43.
+- Added tests for late/out-of-order events, duplicate/replayed events, window expiry, knowledge boundaries, rollback, migration backfill, targeted cache behavior and in-flight writes, concurrent generation replacement, and the executable Batch job. Extended real-Kafka and packaged outage/restart checks.
+- Verified 2026-10-12: all 13 reactor projects and 259 Java tests passed with zero failures/errors/skips; 57 Python tests and dependency checks passed. Packaged training/serving/cache/rollback checks passed, including reconciliation with Kafka stopped and Redis paused, live HTTP counters, replay and API restart without duplicate effects.
+- See [Day 34 operations](DAY34_LIVE_FEATURES.md) for live-versus-historical boundaries, recovery commands, retained-source requirements and finite-job scale limits.
 
 **Day 35 — Kafka resilience, observability, and runbook**
 - Add end-to-end Testcontainers tests covering API → database/outbox → Kafka → consumer/projection, duplicates, retries, dead-letter routing, ordering per key, and broker/consumer restarts.

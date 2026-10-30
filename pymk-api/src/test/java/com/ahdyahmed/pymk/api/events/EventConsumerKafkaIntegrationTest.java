@@ -113,6 +113,8 @@ class EventConsumerKafkaIntegrationTest {
         committedPast(CACHE, metadata);
         assertThat(effects(FEATURE, event.eventId())).isEqualTo(1);
         assertThat(effects(CACHE, event.eventId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM live_member_event e JOIN live_projection_active a ON e.generation = a.generation WHERE event_id = ?",
+                Long.class, event.eventId())).isEqualTo(1);
     }
 
     @Test void conflictingIdIsDeadLetteredWithMetadataThenPartitionContinues() throws Exception {
@@ -150,6 +152,8 @@ class EventConsumerKafkaIntegrationTest {
                 SELECT aggregate_sequence FROM event_consumer_journal WHERE consumer_name = ? AND event_id = ?
                 """, Long.class, FEATURE, id)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM member_events WHERE actor_member_id = 331", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT aggregate_sequence FROM live_connection_state WHERE first_member_id = 331 AND second_member_id = 332", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT epoch FROM member_cache_epoch WHERE member_id = 331", Long.class)).isEqualTo(1);
     }
 
     @Test void oversizedPoisonFitsDltWithRecoveryMetadataAndDoesNotBlockFollowingRecords() throws Exception {

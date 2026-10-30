@@ -6,10 +6,10 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 33 complete (M1–M5 complete; M6 in progress).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 34 complete (M1–M5 complete; M6 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > Kafka ingestion/outbox, independently deduplicated journal consumers, bounded retries and acknowledged dead-letter recovery are implemented.
-> Next: live feature projections/cache invalidation (Day 34), then resilience/observability (Day 35).
+> Live feature windows, durable targeted cache invalidation and finite reconciliation are implemented. Next: resilience/observability (Day 35).
 > MLflow (M7, Days 36–40), Airflow (M8, Days 41–45), observability and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 33 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 34 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -173,8 +173,8 @@ pymk/
 
 All listed Java modules and the Python trainer have implemented content through
 Day 33. `pymk-event-stream` supplies frozen contracts, source/DLT topology and replay.
-The API owns ingestion/outbox and durable journal consumers; live feature/cache
-projections remain Day 34.
+The API owns ingestion/outbox and durable consumers, including live feature windows
+and sequence-aware cache invalidation added on Day 34.
 
 ### Day 31 Kafka development profile
 
@@ -212,9 +212,18 @@ delivery has no second database effect; poison records use bounded exponential
 retries and acknowledged versioned DLTs. Failed DLT publishing never authorizes
 skipping the source record. Rerun `kafka-init` to add the new topics.
 
-These consumers do not yet update live features or evict caches asynchronously
-(Day 34). See the [Day 33 runbook](docs/DAY33_EVENT_CONSUMERS.md) for ordering limits,
+Day 34 adds transactional live projections to these consumers.
+See the [Day 33 runbook](docs/DAY33_EVENT_CONSUMERS.md) for ordering limits,
 retention, safe single-record replay and verification commands.
+
+### Day 34 live features and cache freshness
+
+`GET /api/v1/members/{id}/live-features/{candidateId}` returns current directional
+profile-view and invite counters (30-day default), without changing historical
+model features. Flyway V11 backfills existing journals; connection consumers
+advance durable per-member cache versions. A finite reconciliation job repairs
+state even during Kafka/Redis downtime. See the [Day 34 runbook](docs/DAY34_LIVE_FEATURES.md)
+for configuration, recovery commands, knowledge boundaries and retention limits.
 
 ## Data model & how to seed the DB
 
@@ -298,7 +307,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M6 - Day 33: Idempotent consumers and dead-letter recovery","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M6 - Day 34: Live features and durable cache invalidation","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -687,7 +696,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 31 — Kafka infrastructure and contracts**: optional persistent KRaft broker, checked topic initialization, strict versioned JSON Schemas, immutable envelopes, stable keys/identity comparison and real-broker tests. See the [Day 31 runbook](docs/DAY31_KAFKA_CONTRACTS.md).
 - [x] **Day 32 — Durable event ingestion and outbox**: atomic receipts/domain writes, bounded admission, connection domain events and leased acknowledged Kafka publishing with crash/retry coverage. See the [Day 32 runbook](docs/DAY32_EVENT_OUTBOX.md).
 - [x] **Day 33 — Idempotent consumers and recovery**: transactional receipts/journals, independent groups, bounded blocking retries, acknowledged DLT publishing, replay/retention guards and a finite replay CLI. See the [Day 33 runbook](docs/DAY33_EVENT_CONSUMERS.md).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. The implemented checkpoint is Day 33; Day 34 is next.
+- [x] **Day 34 — Live features and cache freshness**: versioned live windows, V11 journal bootstrap, durable targeted cache epochs and finite reconciliation; full regression and packaged outage/restart verification passed. See the [Day 34 runbook](docs/DAY34_LIVE_FEATURES.md).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. The implemented checkpoint is Day 34; Day 35 is next.
 
 ## License
 

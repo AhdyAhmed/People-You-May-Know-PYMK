@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox, [switch]$IncludeConsumers)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox, [switch]$IncludeConsumers, [switch]$IncludeLiveFeatures)
+if ($IncludeLiveFeatures) { $IncludeConsumers = $true }
 if ($IncludeConsumers) { $IncludeOutbox = $true }
 if ($IncludeBlendTuning) { $IncludeReranker = $true }
 if ($IncludeReranker) { $IncludeL2Serving = $true }
@@ -257,6 +258,17 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         if ([int]$readDuringOutage.StatusCode -ne 200) { throw 'Broker outage broke recommendation reads' }
         $connection = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/connections" -Method Post -ContentType 'application/json' -Body '{"memberId":3,"connectedMemberId":4}'
         if ([int]$connection.StatusCode -ne 201) { throw 'Connection did not commit during broker outage' }
+        if ($IncludeLiveFeatures) {
+            $cutoff = [DateTime]::UtcNow.ToString('o')
+            $windowStart = [DateTime]::UtcNow.AddDays(-30).ToString('o')
+            Checked 'docker' @('pause', $redis)
+            try {
+                Batch @('--spring.batch.job.name=liveFeatureReconciliationJob', "windowStart=$windowStart", "windowEnd=$cutoff", "knowledgeCutoff=$cutoff")
+            } finally { Checked 'docker' @('unpause', $redis) }
+            $live = Invoke-RestMethod "http://127.0.0.1:$port/api/v1/members/1/live-features/2"
+            if ($live.profileViews -ne 1) { throw 'Reconciliation did not repair live counters during broker outage' }
+            if ((Sql 'SELECT epoch FROM member_cache_epoch WHERE member_id = 3') -ne '1') { throw 'Reconciliation did not recover targeted invalidation' }
+        }
         Checked 'docker' ($kafkaCompose + @('up', '-d', '--wait', '--wait-timeout', '120', 'kafka'))
         for ($i = 0; $i -lt 60; $i++) {
             if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NOT NULL') -eq '2') { break }
@@ -281,6 +293,12 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         if ($IncludeConsumers) {
             if ((Sql 'SELECT count(*) FROM event_consumer_journal') -ne '4') { throw 'Restart duplicated consumer effects' }
             Write-Host 'PASS: Day 33 packaged HTTP/outbox/Kafka pipeline committed once per independent consumer and survived API restart'
+            if ($IncludeLiveFeatures) {
+                $live = Invoke-RestMethod "http://127.0.0.1:$port/api/v1/members/1/live-features/2"
+                if ($live.profileViews -ne 1) { throw 'Kafka replay or restart duplicated live counts' }
+                if ((Sql 'SELECT epoch FROM member_cache_epoch WHERE member_id = 3') -ne '1') { throw 'Kafka replay duplicated cache invalidation' }
+                Write-Host 'PASS: Day 34 packaged reconciliation during Kafka outage, live HTTP counters, sequence-safe cache invalidation and replay/restart safety'
+            }
         }
         Write-Host 'PASS: Day 32 actual HTTP acceptance through broker outage, scheduled relay recovery, Kafka identity and durable receipt after API restart'
     }

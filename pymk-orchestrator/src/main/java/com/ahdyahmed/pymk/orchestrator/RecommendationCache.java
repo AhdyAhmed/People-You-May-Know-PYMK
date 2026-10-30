@@ -31,12 +31,18 @@ public class RecommendationCache {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final ThreadLocal<Long> sourceRevision = new ThreadLocal<>();
+    private final ThreadLocal<java.util.Map<Long, Long>> memberEpochs = new ThreadLocal<>();
 
     /** A request keeps one cache generation even if a source mutation commits mid-flight. */
     public com.ahdyahmed.pymk.domain.service.ServingReleaseStore.Scope pinNamespace() {
         Long previous = sourceRevision.get();
+        var previousEpochs = memberEpochs.get();
+        memberEpochs.set(new java.util.HashMap<>());
         if (jdbc != null) sourceRevision.set(jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class));
-        return () -> { if (previous == null) sourceRevision.remove(); else sourceRevision.set(previous); };
+        return () -> {
+            if (previous == null) sourceRevision.remove(); else sourceRevision.set(previous);
+            if (previousEpochs == null) memberEpochs.remove(); else memberEpochs.set(previousEpochs);
+        };
     }
 
     private static final Logger log = LoggerFactory.getLogger(RecommendationCache.class);
@@ -178,8 +184,17 @@ public class RecommendationCache {
             Long revision = sourceRevision.get();
             if (revision == null) revision = jdbc.queryForObject("SELECT revision FROM pymk_source_revision", Long.class);
             key += ":source:" + revision;
+            var pinned = memberEpochs.get();
+            long epoch = pinned == null ? memberEpoch(memberId) : pinned.computeIfAbsent(memberId, this::memberEpoch);
+            key += ":member-epoch:" + epoch;
         }
         return selected == null || selected.epoch() == 0 ? key : key + ":release:" + selected.namespace();
+    }
+
+    private long memberEpoch(long memberId) {
+        Long value = jdbc.queryForObject(
+                "SELECT COALESCE((SELECT epoch FROM member_cache_epoch WHERE member_id = ?), 0)", Long.class, memberId);
+        return value == null ? 0 : value;
     }
 
     private <T> Optional<T> read(String key, JsonReader<T> reader) {

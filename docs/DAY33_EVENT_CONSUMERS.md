@@ -1,5 +1,9 @@
 # Day 33 — Idempotent consumers, retries and dead-letter recovery
 
+This records the Day 33 checkpoint. [Day 34](DAY34_LIVE_FEATURES.md) adds live
+window projections and durable cache epochs through V11, including bootstrap of
+existing journals. The receipt, retry and replay guarantees below still apply.
+
 ## Implemented behavior
 
 Two opt-in Spring Kafka consumer groups independently process both v1 source topics:

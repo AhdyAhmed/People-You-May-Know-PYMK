@@ -12,7 +12,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 public class EventDeadLetterPublisher {
     public static final String PREFIX = "pymk-dlt-";
     private final KafkaTemplate<byte[], byte[]> template;
-    public EventDeadLetterPublisher(KafkaTemplate<byte[], byte[]> template) { this.template = template; }
+    private final EventMetrics metrics;
+    public EventDeadLetterPublisher(KafkaTemplate<byte[], byte[]> template) { this(template, null); }
+    public EventDeadLetterPublisher(KafkaTemplate<byte[], byte[]> template, EventMetrics metrics) {
+        this.template = template; this.metrics = metrics;
+    }
 
     public void recover(String group, ConsumerRecord<byte[], byte[]> record, Exception failure) {
         var headers = new RecordHeaders();
@@ -33,14 +37,18 @@ public class EventDeadLetterPublisher {
         add(headers, "reason", reason);
         var deadLetter = new ProducerRecord<byte[], byte[]>(KafkaTopics.deadLetterTopic(record.topic()),
                 record.partition(), null, record.key(), record.value(), headers);
+        boolean acknowledged = false;
         try {
             template.send(deadLetter).get(20, TimeUnit.SECONDS);
+            acknowledged = true;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("DLT publication interrupted");
         } catch (Exception unavailable) {
             // Throwing prevents the error handler from advancing the source offset.
             throw new IllegalStateException("DLT publication unacknowledged");
+        } finally {
+            if (metrics != null) metrics.deadLetter(group, acknowledged);
         }
     }
     private static void add(RecordHeaders headers, String name, String value) {

@@ -63,12 +63,12 @@ status differ.
 | Durable event ingestion, transactional outbox and acknowledged Kafka publishing | Implemented Day 32; see `DAY32_EVENT_OUTBOX.md` |
 | Independent journal consumers, durable deduplication, bounded retries and DLT replay | Implemented Day 33; see `DAY33_EVENT_CONSUMERS.md` |
 | Live event windows, durable cache epochs and finite reconciliation | Implemented Day 34; see `DAY34_LIVE_FEATURES.md` |
-| Kafka resilience telemetry | Planned for Day 35 (M6) |
+| Kafka restart resilience and operational metrics | Implemented Day 35; see `DAY35_KAFKA_OPERATIONS.md` |
 | MLflow experiment tracking, model registry and guarded release preparation | Planned for Days 36–40 (M7); section 7.3 |
 | Airflow scheduling, safe backfills and restartable batch/ML workflows | Planned for Days 41–45 (M8); section 7.4 |
 | Unified operational dashboards and packaged portfolio release | Planned for M9–M10 |
 
-The current checkpoint is **Day 34 complete (M1–M5 complete; M6 in progress)**. Target-only sections below use
+The current checkpoint is **Day 35 complete (M1–M6)**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
@@ -148,7 +148,7 @@ flowchart LR
         RR["Re-Ranker: Exposure Diversity"]
     end
 
-    subgraph Streaming["Event Streaming (implemented through Day 34)"]
+    subgraph Streaming["Event Streaming (implemented through Day 35)"]
         RELAY[Transactional Outbox Relay]
         KAFKA[[Apache Kafka]]
         PROJ["Feature Journal Consumer"]
@@ -188,7 +188,7 @@ flowchart LR
     INVALIDATE -->|"retry exhausted"| DLT
 ```
 
-Ranking stages run in-process behind Java interfaces at the Day 34 checkpoint;
+Ranking stages run in-process behind Java interfaces at the Day 35 checkpoint;
 L2 and re-ranking are opt-in. Dashed edges denote planned
 orchestration/tracking, not request-time dependencies. Ingestion/outbox publishing
 and independent durable consumers with live feature/cache projections are implemented.
@@ -213,7 +213,7 @@ a separate microservice.
 | Persistence | Spring Data JPA + PostgreSQL | Core member/connection/event data |
 | Caching | Spring Data Redis | Cache L0 candidate sets and final PYMK lists (TTL) |
 | Batch / ETL | Spring Batch | Implemented restartable jobs; automatic schedules arrive in M8 |
-| Async / messaging (M6 in progress) | Apache Kafka 3.9.1 + Spring Kafka | Ingestion/outbox, consumers, DLT recovery, live windows and durable cache epochs through Day 34; resilience telemetry remains Day 35 |
+| Async / messaging (M6) | Apache Kafka 3.9.1 + Spring Kafka | Outbox, consumers, DLT recovery, live windows, cache epochs, restart resilience and Micrometer monitoring through Day 35 |
 | Experiment/model lifecycle (planned M7) | MLflow Tracking + Model Registry | PostgreSQL metadata, persistent artifact storage, exact model versions and auditable release preparation |
 | Workflow orchestration (planned M8) | Apache Airflow | Schedules existing Spring Batch/Python jobs; independent metadata and bounded worker resources |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
@@ -585,7 +585,7 @@ groups. Blank groups remain valid; missing member rows fail the cold request.
 
 ## 7. Offline Pipeline (Spring Batch)
 
-Frequencies below are intended operational schedules. Through Day 34 the
+Frequencies below are intended operational schedules. Through Day 35 the
 implemented jobs are launched explicitly; automatic scheduling belongs to M8.
 
 | Job | Frequency | Purpose |
@@ -739,7 +739,7 @@ M8 will extend that mechanism to every scheduled feature refresh, activate it at
 invalidate affected result caches, and retain the previous generation for
 rollback. A failed staged refresh must leave the active generation untouched.
 
-### 7.2 Kafka event pipeline (implemented through Day 34)
+### 7.2 Kafka event pipeline (implemented through Day 35)
 
 Day 31 ships the optional Kafka Compose profile, persistent KRaft broker,
 checked topic initialization and standalone `pymk-event-stream` contract library.
@@ -812,9 +812,17 @@ atomically activates a new generation under admission/projection locks. It also
 recovers sequence-aware invalidations without Kafka or Redis. No legacy feature
 writer touches managed/historical features. See [Day 34 operations](DAY34_LIVE_FEATURES.md)
 for boundaries, retention and scale limits. Nightly Airflow scheduling remains M8.
-Planned observability covers outbox lag,
-consumer lag, publish/consume rates, retries, dead-letter counts, processing
-latency, and projection freshness.
+Day 35 exposes Micrometer publishing/processing timers, scheduled-retry and DLT
+counters, plus opt-in cached outbox backlog, consumer lag and live-projection
+freshness gauges. A separate bounded-operation monitor worker does no work on
+request/scrape threads; failed polls expose NaN and explicit availability/staleness
+signals instead of zero lag. Group/source/outcome labels have fixed cardinality.
+The Actuator JSON endpoint is an explicit opt-in on a protected management listener,
+not an installed Prometheus/Grafana stack. Process counters reset on restart;
+cluster backlog gauges must not be summed across replicas. Real-broker tests cover
+original per-key order, broker/consumer restart and metric recovery. See
+[Day 35 operations](DAY35_KAFKA_OPERATIONS.md) for semantics, polling costs,
+alerts, failure handling, schema evolution and replay. Unified dashboards remain M9.
 
 The outbox relay claims bounded head-of-key batches with recoverable ownership/leases,
 blocks later distinct records until the earlier publication marker, and retries a
@@ -1153,7 +1161,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 3. **M3 — Feature store + L1**: directional persistence, snapshot-safe computation, restartable materialization, leakage-safe label export, chronological ONNX model training, contract-validated batched Java serving, and the public L0 → L1 cutover are **complete through Day 21**.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
 5. **M5 — Re-ranker**: blending + exposure diversification, validation-only Bayesian weight tuning, immutable configuration/report artifacts and a seeded-to-packaged-HTTP rollback demo are **complete through Day 30**. No automatic production promotion or causal lift is claimed.
-6. **M6 — Kafka event backbone (in progress)**: infrastructure/contracts, ingestion/outbox, independent consumers, retries/DLT replay, live windows, cache epochs and finite reconciliation implemented through Day 34; resilience telemetry remains Day 35.
+6. **M6 — Kafka event backbone (complete through Day 35)**: infrastructure/contracts, ingestion/outbox, independent consumers, retries/DLT replay, live windows, cache epochs, finite reconciliation, restart resilience and operational metrics implemented and verified. See the Day 35 runbook for regression and packaged-application evidence.
 7. **M7 — MLflow experiment and model lifecycle (Days 36–40, planned)**: tracked reproducible runs, persistent artifact storage, exact registered ONNX versions, guarded model-sync/release preparation and outage/restore verification.
 8. **M8 — Airflow orchestration + batch operations (Days 41–45, planned)**: schedule existing jobs, mature-data dependencies, bounded retries, stable work identities, Kafka reconciliation, safe backfills and controlled release workflows.
 9. **M9 — Observability + offline eval dashboard (planned)**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, MLflow/Airflow operational visibility, and Recall@k tracking over time.

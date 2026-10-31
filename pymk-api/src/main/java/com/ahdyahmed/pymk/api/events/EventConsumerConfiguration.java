@@ -44,26 +44,31 @@ public class EventConsumerConfiguration {
     }
 
     @Bean
-    EventDeadLetterPublisher eventDeadLetterPublisher(KafkaTemplate<byte[], byte[]> deadLetterKafkaTemplate) {
-        return new EventDeadLetterPublisher(deadLetterKafkaTemplate);
+    EventDeadLetterPublisher eventDeadLetterPublisher(KafkaTemplate<byte[], byte[]> deadLetterKafkaTemplate, EventMetrics metrics) {
+        return new EventDeadLetterPublisher(deadLetterKafkaTemplate, metrics);
     }
 
     @Bean
     ConcurrentMessageListenerContainer<byte[], byte[]> featureEventConsumer(DurableEventConsumer consumer,
-            EventDeadLetterPublisher recoverer,
+            EventDeadLetterPublisher recoverer, EventMetrics metrics,
             @Value("${pymk.events.consumers.bootstrap-servers:localhost:9092}") String bootstrap) {
-        return container(KafkaTopics.FEATURE_PROJECTION_GROUP, bootstrap, consumer, recoverer);
+        return container(KafkaTopics.FEATURE_PROJECTION_GROUP, bootstrap, consumer, recoverer, metrics);
     }
 
     @Bean
     ConcurrentMessageListenerContainer<byte[], byte[]> cacheEventConsumer(DurableEventConsumer consumer,
-            EventDeadLetterPublisher recoverer,
+            EventDeadLetterPublisher recoverer, EventMetrics metrics,
             @Value("${pymk.events.consumers.bootstrap-servers:localhost:9092}") String bootstrap) {
-        return container(KafkaTopics.CACHE_INVALIDATION_GROUP, bootstrap, consumer, recoverer);
+        return container(KafkaTopics.CACHE_INVALIDATION_GROUP, bootstrap, consumer, recoverer, metrics);
     }
 
     public static ConcurrentMessageListenerContainer<byte[], byte[]> container(String group, String bootstrap,
             DurableEventConsumer consumer, EventDeadLetterPublisher recoverer) {
+        return container(group, bootstrap, consumer, recoverer, null);
+    }
+
+    public static ConcurrentMessageListenerContainer<byte[], byte[]> container(String group, String bootstrap,
+            DurableEventConsumer consumer, EventDeadLetterPublisher recoverer, EventMetrics metrics) {
         var factory = new DefaultKafkaConsumerFactory<byte[], byte[]>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap,
                 ConsumerConfig.GROUP_ID_CONFIG, group,
@@ -79,7 +84,12 @@ public class EventConsumerConfiguration {
         properties.setAckMode(ContainerProperties.AckMode.RECORD);
         properties.setSyncCommits(true);
         properties.setPollTimeout(500);
-        properties.setMessageListener((MessageListener<byte[], byte[]>) record -> consumer.accept(group, record));
+        properties.setMessageListener((MessageListener<byte[], byte[]>) record -> {
+            long started = System.nanoTime();
+            boolean committed = false;
+            try { consumer.accept(group, record); committed = true; }
+            finally { if (metrics != null) metrics.process(group, started, committed); }
+        });
         var container = new ConcurrentMessageListenerContainer<>(factory, properties);
         container.setBeanName(group);
         var backoff = new ExponentialBackOffWithMaxRetries(3);
@@ -95,6 +105,10 @@ public class EventConsumerConfiguration {
         handler.setClassifications(Map.of(Exception.class, true), true);
         handler.setResetStateOnRecoveryFailure(true);
         handler.setResetStateOnExceptionChange(false);
+        if (metrics != null) handler.setRetryListeners((record, failure, attempt) -> {
+            // Failures 1..3 schedule a retry; failure 4 proceeds to DLT recovery.
+            if (attempt >= 1 && attempt <= 3) metrics.retry(group);
+        });
         container.setCommonErrorHandler(handler);
         return container;
     }

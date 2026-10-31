@@ -36,21 +36,35 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.*;
 
-@SpringBootTest(properties = {"pymk.events.consumers.enabled=true", "pymk.events.relay.enabled=true"})
+@SpringBootTest(properties = {"pymk.events.consumers.enabled=true", "pymk.events.relay.enabled=true",
+        "pymk.events.monitoring.enabled=true", "pymk.events.monitoring.poll-ms=3600000",
+        "management.endpoints.web.exposure.include=health,info,metrics"})
 @AutoConfigureMockMvc
 @Import(PostgresTestConfig.class)
 @MockitoBean(types = LightRankerModel.class)
 @Testcontainers
 @org.springframework.test.annotation.DirtiesContext
 class EventConsumerKafkaIntegrationTest {
+    // Docker reassigns random published ports on stop/start; keep the advertised listener stable.
+    static final int BROKER_PORT = availablePort();
     @Container static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1")
-            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false")
+            .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(
+                    new com.github.dockerjava.api.model.PortBinding(
+                            com.github.dockerjava.api.model.Ports.Binding.bindIpAndPort("127.0.0.1", BROKER_PORT),
+                            new com.github.dockerjava.api.model.ExposedPort(9092))));
+    static int availablePort() {
+        try (var socket = new java.net.ServerSocket(0, 0, java.net.InetAddress.getLoopbackAddress())) { return socket.getLocalPort(); }
+        catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+    }
     static final String FEATURE = KafkaTopics.FEATURE_PROJECTION_GROUP;
     static final String CACHE = KafkaTopics.CACHE_INVALIDATION_GROUP;
     final EventContract contract = new EventContract();
     @Autowired JdbcTemplate jdbc;
     @Autowired DurableEventConsumer service;
     @Autowired MockMvc mvc;
+    @Autowired EventMonitor monitor;
+    @Autowired io.micrometer.core.instrument.MeterRegistry metrics;
     @Autowired @Qualifier("deadLetterKafkaTemplate") KafkaTemplate<byte[], byte[]> template;
     @Autowired @Qualifier("featureEventConsumer") ConcurrentMessageListenerContainer<byte[], byte[]> feature;
     @Autowired @Qualifier("cacheEventConsumer") ConcurrentMessageListenerContainer<byte[], byte[]> cache;
@@ -115,6 +129,10 @@ class EventConsumerKafkaIntegrationTest {
         assertThat(effects(CACHE, event.eventId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM live_member_event e JOIN live_projection_active a ON e.generation = a.generation WHERE event_id = ?",
                 Long.class, event.eventId())).isEqualTo(1);
+        assertThat(metrics.get("pymk.events.consumer.process").tag("group", FEATURE).tag("outcome", "committed").timer().count()).isPositive();
+        assertThat(metrics.get("pymk.events.outbox.send").tag("outcome", "acknowledged").timer().count()).isPositive();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/actuator/metrics/pymk.events.consumer.process"))
+                .andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.name").value("pymk.events.consumer.process"));
     }
 
     @Test void conflictingIdIsDeadLetteredWithMetadataThenPartitionContinues() throws Exception {
@@ -140,7 +158,64 @@ class EventConsumerKafkaIntegrationTest {
         assertThat(dlt.headers().lastHeader("trace-test").value()).isEqualTo("retained".getBytes(StandardCharsets.UTF_8));
         assertThat(deadLetter(changed.eventId(), CACHE)).isNotNull();
         assertThat(effects(FEATURE, original.eventId())).isEqualTo(1);
+        assertThat(metrics.get("pymk.events.consumer.retries").tag("group", FEATURE).counter().count()).isGreaterThanOrEqualTo(3);
+        assertThat(metrics.get("pymk.events.consumer.dead.letters").tag("group", FEATURE).tag("outcome", "acknowledged").counter().count()).isPositive();
     }
+
+    @Test void brokerAndConsumerRestartsPreservePerKeyOrderAndExposeBacklogWithoutFalseZero() throws Exception {
+        jdbc.update("INSERT INTO members(id, full_name) VALUES (35101, 'Restart A'), (35102, 'Restart B') ON CONFLICT DO NOTHING");
+        var ids = new ArrayList<UUID>();
+        var docker = org.testcontainers.DockerClientFactory.instance().client();
+        docker.stopContainerCmd(KAFKA.getContainerId()).withTimeout(5).exec();
+        try {
+            for (int i = 0; i < 3; i++) ids.add(postRestartEvent());
+            await().atMost(Duration.ofSeconds(35)).untilAsserted(() ->
+                    assertThat(metrics.find("pymk.events.outbox.send").tag("outcome", "failed").timer()).isNotNull());
+            monitor.poll();
+            assertThat(gauge("pymk.events.monitor.up", "source", "kafka")).isZero();
+            assertThat(gauge("pymk.events.consumer.lag", "group", FEATURE)).isNaN();
+            assertThat(metrics.get("pymk.events.outbox.pending").gauge().value()).isGreaterThanOrEqualTo(3);
+            assertThat(gauge("pymk.events.projection.pending", "group", FEATURE)).isGreaterThanOrEqualTo(3);
+        } finally { docker.startContainerCmd(KAFKA.getContainerId()).exec(); }
+        for (UUID id : ids) appliedBoth(id);
+        assertThat(jdbc.queryForList("""
+                SELECT event_id FROM event_consumer_journal
+                WHERE consumer_name = ? AND subject_member_id = 35101 ORDER BY source_offset
+                """, UUID.class, FEATURE)).containsExactlyElementsOf(ids);
+        assertThat(jdbc.queryForObject("""
+                SELECT count(DISTINCT source_partition) FROM event_consumer_journal
+                WHERE consumer_name = ? AND subject_member_id = 35101
+                """, Long.class, FEATURE)).isEqualTo(1);
+        feature.stop();
+        UUID whileStopped = postRestartEvent();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(effects(CACHE, whileStopped)).isEqualTo(1));
+        monitor.poll();
+        assertThat(gauge("pymk.events.consumer.lag", "group", FEATURE)).isPositive();
+        assertThat(gauge("pymk.events.projection.oldest.age", "group", FEATURE)).isPositive();
+        feature.start();
+        appliedBoth(whileStopped);
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            monitor.poll();
+            assertThat(gauge("pymk.events.monitor.up", "source", "kafka")).isEqualTo(1);
+            assertThat(gauge("pymk.events.consumer.lag", "group", FEATURE)).isZero();
+            assertThat(gauge("pymk.events.projection.pending", "group", FEATURE)).isZero();
+        });
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM live_member_event e JOIN live_projection_active a ON e.generation = a.generation
+                WHERE subject_member_id = 35101
+                """, Long.class)).isEqualTo(4);
+    }
+
+    private UUID postRestartEvent() throws Exception {
+        var event = new EventEnvelope(1, UUID.randomUUID(), StreamEventType.PROFILE_VIEW,
+                java.time.Instant.now().minusSeconds(1), java.time.Instant.now(), 35101, 35102, UUID.randomUUID(), Map.of());
+        var node = (com.fasterxml.jackson.databind.node.ObjectNode) new com.fasterxml.jackson.databind.ObjectMapper().readTree(contract.encode(event));
+        node.remove("ingestedAt");
+        mvc.perform(post("/api/v1/events").contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+                .andExpect(status().isAccepted());
+        return event.eventId();
+    }
+    private double gauge(String name, String tag, String value) { return metrics.get(name).tag(tag, value).gauge().value(); }
 
     @Test void connectionDomainEventReachesBothJournalsWithoutInventingLabels() throws Exception {
         jdbc.update("INSERT INTO members(id, full_name) VALUES (331, 'C'), (332, 'D') ON CONFLICT DO NOTHING");

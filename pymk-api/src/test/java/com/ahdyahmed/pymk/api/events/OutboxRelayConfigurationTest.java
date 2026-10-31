@@ -15,6 +15,7 @@ class OutboxRelayConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(KafkaAutoConfiguration.class))
             .withUserConfiguration(OutboxRelayConfiguration.class)
+            .withBean(EventMetrics.class, () -> new EventMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()))
             .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
             .withBean(PlatformTransactionManager.class, () -> {
                 var manager = mock(PlatformTransactionManager.class);

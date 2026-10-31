@@ -30,6 +30,9 @@ spring:
 
 pymk:
   events:
+    monitoring:
+      enabled: ${PYMK_EVENT_MONITORING_ENABLED:false}
+      poll-ms: 10000
     consumers:
       enabled: ${PYMK_EVENT_CONSUMERS_ENABLED:false}
       bootstrap-servers: ${PYMK_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -75,7 +78,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: ${PYMK_MANAGEMENT_EXPOSURE:health,info}
 
 springdoc:
   api-docs:

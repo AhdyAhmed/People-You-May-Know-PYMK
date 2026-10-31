@@ -19,7 +19,8 @@ class EventDeadLetterPublisherTest {
         var input = new ConsumerRecord<byte[], byte[]>(KafkaTopics.MEMBER_EVENTS, 2, 99,
                 new byte[]{1}, new byte[]{(byte) 0xff});
         input.headers().add("source-trace", new byte[]{2});
-        new EventDeadLetterPublisher(template).recover("test-consumer", input,
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        new EventDeadLetterPublisher(template, new EventMetrics(registry)).recover("test-consumer", input,
                 new IllegalStateException("private payload must not be copied"));
         ArgumentCaptor<ProducerRecord<byte[], byte[]>> captor = ArgumentCaptor.forClass(ProducerRecord.class);
         verify(template).send(captor.capture());
@@ -31,6 +32,7 @@ class EventDeadLetterPublisherTest {
         assertThat(output.headers().lastHeader("source-trace").value()).containsExactly(2);
         assertThat(new String(output.headers().lastHeader("pymk-dlt-reason").value(), StandardCharsets.UTF_8))
                 .isEqualTo("PROCESSING_FAILED");
+        assertThat(registry.get("pymk.events.consumer.dead.letters").tag("outcome", "acknowledged").counter().count()).isEqualTo(1);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -39,7 +41,10 @@ class EventDeadLetterPublisherTest {
         when(template.send(any(ProducerRecord.class))).thenReturn(
                 CompletableFuture.failedFuture(new IllegalStateException("unavailable")));
         var input = new ConsumerRecord<byte[], byte[]>(KafkaTopics.CONNECTION_EVENTS, 0, 4, null, null);
-        assertThatThrownBy(() -> new EventDeadLetterPublisher(template).recover("test-consumer", input,
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        assertThatThrownBy(() -> new EventDeadLetterPublisher(template, new EventMetrics(registry)).recover("test-consumer", input,
                 new IllegalArgumentException())).hasMessage("DLT publication unacknowledged");
+        assertThat(registry.get("pymk.events.consumer.dead.letters").tag("outcome", "failed").counter().count()).isEqualTo(1);
+        assertThat(registry.find("pymk.events.consumer.dead.letters").tag("outcome", "acknowledged").counter()).isNull();
     }
 }

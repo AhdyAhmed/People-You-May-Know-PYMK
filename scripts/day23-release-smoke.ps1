@@ -1,4 +1,5 @@
-param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox, [switch]$IncludeConsumers, [switch]$IncludeLiveFeatures)
+param([string]$Python = "$PSScriptRoot/../pymk-ml-training/.venv/Scripts/python.exe", [switch]$IncludeV2, [switch]$IncludeHeavy, [switch]$IncludeJavaHeavy, [switch]$IncludeEvaluation, [switch]$IncludeL2Serving, [switch]$IncludeReranker, [switch]$IncludeBlendTuning, [switch]$IncludeOutbox, [switch]$IncludeConsumers, [switch]$IncludeLiveFeatures, [switch]$IncludeObservability)
+if ($IncludeObservability) { $IncludeLiveFeatures = $true }
 if ($IncludeLiveFeatures) { $IncludeConsumers = $true }
 if ($IncludeConsumers) { $IncludeOutbox = $true }
 if ($IncludeBlendTuning) { $IncludeReranker = $true }
@@ -25,13 +26,16 @@ function StartSmokeApi([string]$mode) {
         if (-not $script:api.WaitForExit(10000)) { throw 'Previous API process did not stop' }
     }
     $script:apiBoot++
-    $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port","--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
+    $apiArgs = @('-jar', $apiJar) + $database + @("--server.port=$port",'--server.address=127.0.0.1',"--spring.data.redis.port=$redisPort",'--spring.data.redis.host=127.0.0.1',"--pymk.light-ranker.model-path=$output/missing.onnx","--pymk.light-ranker.metadata-path=$output/missing.json","--pymk.serving.ranker=$mode")
     if ($IncludeOutbox) {
         $apiArgs += @('--pymk.events.relay.enabled=true', "--pymk.events.relay.bootstrap-servers=localhost:$kafkaPort")
     } else { $apiArgs += '--pymk.events.relay.enabled=false' }
     if ($IncludeConsumers) {
         $apiArgs += @('--pymk.events.consumers.enabled=true', "--pymk.events.consumers.bootstrap-servers=localhost:$kafkaPort")
     } else { $apiArgs += '--pymk.events.consumers.enabled=false' }
+    if ($IncludeObservability) {
+        $apiArgs += @('--pymk.events.monitoring.enabled=true', '--pymk.events.monitoring.poll-ms=1000', '--management.endpoints.web.exposure.include=health,info,metrics')
+    } else { $apiArgs += '--pymk.events.monitoring.enabled=false' }
     if ($mode -eq 'RERANK' -and $IncludeBlendTuning) {
         $configPath = "$output/blend/application-blend.properties" -replace '\\','/'
         $apiArgs += "--spring.config.additional-location=file:$configPath"
@@ -76,6 +80,15 @@ function CheckResponse {
         if (-not [double]::IsFinite($score) -or $score -lt 0 -or $score -gt 1) { throw 'Invalid probability' }
     }
     return ($response | ConvertTo-Json -Depth 10 -Compress)
+}
+function MetricValue([string]$name, [string]$tag) {
+    $uri = "http://127.0.0.1:$port/actuator/metrics/$name"
+    if ($tag) { $uri += '?tag=' + [uri]::EscapeDataString($tag) }
+    $metric = Invoke-RestMethod $uri
+    $value = ($metric.measurements | Where-Object statistic -EQ 'VALUE').value
+    # JSON may encode a non-finite gauge as null; unknown must never become zero.
+    if ($null -eq $value) { return [double]::NaN }
+    return [double]$value
 }
 Push-Location $root
 try {
@@ -254,6 +267,13 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
         if ((Sql 'SELECT count(*) FROM event_outbox WHERE published_at IS NULL AND attempts > 0') -ne '1') {
             throw 'Outage did not retain the failed publish for retry'
         }
+        if ($IncludeObservability) {
+            for ($i = 0; $i -lt 30; $i++) {
+                if ((MetricValue 'pymk.events.monitor.up' 'source:kafka') -eq 0 -and (MetricValue 'pymk.events.outbox.pending' '') -ge 1) { break }
+                Start-Sleep -Seconds 1
+            }
+            if ((MetricValue 'pymk.events.monitor.up' 'source:kafka') -ne 0 -or (MetricValue 'pymk.events.outbox.pending' '') -lt 1) { throw 'Outage monitoring did not expose unavailability and retained backlog' }
+        }
         $readDuringOutage = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/pymk/1?limit=2"
         if ([int]$readDuringOutage.StatusCode -ne 200) { throw 'Broker outage broke recommendation reads' }
         $connection = Invoke-WebRequest "http://127.0.0.1:$port/api/v1/connections" -Method Post -ContentType 'application/json' -Body '{"memberId":3,"connectedMemberId":4}'
@@ -298,6 +318,15 @@ SELECT 2,1,'INVITE_SENT',d::timestamptz FROM (VALUES ('2026-01-04'),('2026-01-11
                 if ($live.profileViews -ne 1) { throw 'Kafka replay or restart duplicated live counts' }
                 if ((Sql 'SELECT epoch FROM member_cache_epoch WHERE member_id = 3') -ne '1') { throw 'Kafka replay duplicated cache invalidation' }
                 Write-Host 'PASS: Day 34 packaged reconciliation during Kafka outage, live HTTP counters, sequence-safe cache invalidation and replay/restart safety'
+            }
+            if ($IncludeObservability) {
+                for ($i = 0; $i -lt 45; $i++) {
+                    if ((MetricValue 'pymk.events.monitor.up' 'source:kafka') -eq 1 -and (MetricValue 'pymk.events.consumer.lag' 'group:pymk.feature-projection.v1') -eq 0) { break }
+                    Start-Sleep -Seconds 1
+                }
+                if ((MetricValue 'pymk.events.monitor.up' 'source:kafka') -ne 1 -or (MetricValue 'pymk.events.consumer.lag' 'group:pymk.feature-projection.v1') -ne 0) { throw 'Recovered Kafka lag did not converge to zero' }
+                if ((MetricValue 'pymk.events.projection.pending' 'group:pymk.feature-projection.v1') -ne 0) { throw 'Recovered live projection backlog did not converge to zero' }
+                Write-Host 'PASS: Day 35 actual HTTP monitoring reported broker failure/backlog and recovered zero lag after API restart'
             }
         }
         Write-Host 'PASS: Day 32 actual HTTP acceptance through broker outage, scheduled relay recovery, Kafka identity and durable receipt after API restart'

@@ -51,10 +51,13 @@ public class OutboxRelayConfiguration {
             KafkaTemplate<String, String> outboxKafkaTemplate,
             @Value("${pymk.events.relay.batch-size:50}") int batchSize,
             @Value("${pymk.events.relay.lease-seconds:60}") int leaseSeconds,
-            @Value("${pymk.events.relay.retry-seconds:5}") int retrySeconds) {
+            @Value("${pymk.events.relay.retry-seconds:5}") int retrySeconds, EventMetrics metrics) {
         return new OutboxRelay(jdbc, manager, message -> {
+            long started = System.nanoTime();
+            boolean acknowledged = false;
             try {
                 outboxKafkaTemplate.send(message.topic(), message.key(), message.json()).get(20, TimeUnit.SECONDS);
+                acknowledged = true;
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 outboxProducerFactory.reset();
@@ -63,6 +66,8 @@ public class OutboxRelayConfiguration {
                 // Discard the local producer before releasing the row lock after an uncertain send.
                 outboxProducerFactory.reset();
                 throw new IllegalStateException("Outbox acknowledgement failed", failure);
+            } finally {
+                metrics.send(started, acknowledged);
             }
         }, batchSize, leaseSeconds, retrySeconds);
     }

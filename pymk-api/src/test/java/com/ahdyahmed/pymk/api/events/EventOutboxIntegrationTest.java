@@ -268,14 +268,16 @@ class EventOutboxIntegrationTest {
         var config = new OutboxRelayConfiguration();
         var unavailable = config.outboxProducerFactory("127.0.0.1:1");
         try {
-            config.outboxRelay(jdbc, manager, unavailable, config.outboxKafkaTemplate(unavailable), 2, 60, 5).tick();
+            config.outboxRelay(jdbc, manager, unavailable, config.outboxKafkaTemplate(unavailable), 2, 60, 5,
+                    new EventMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())).tick();
             assertThat(jdbc.queryForObject("SELECT published_at IS NULL AND attempts = 1 FROM event_outbox", Boolean.class))
                     .isTrue();
         } finally { unavailable.destroy(); }
         retryNow();
         var factory = config.outboxProducerFactory(KAFKA.getBootstrapServers());
         try {
-            config.outboxRelay(jdbc, manager, factory, config.outboxKafkaTemplate(factory), 2, 60, 5).tick();
+            config.outboxRelay(jdbc, manager, factory, config.outboxKafkaTemplate(factory), 2, 60, 5,
+                    new EventMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())).tick();
             assertThat(jdbc.queryForObject("SELECT published_at IS NOT NULL FROM event_outbox", Boolean.class)).isTrue();
             try (var consumer = new KafkaConsumer<String, String>(Map.of(
                     ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),

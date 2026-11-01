@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 35 complete (M1–M6 complete).
+**Current checkpoint:** Day 36 complete (M1–M6 complete; M7 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Day 36 MLflow infrastructure is next.
+Day 36 MLflow infrastructure and coordinated recovery are verified. Day 37 tracking integration is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow and Airflow are not implemented at the Day 35 checkpoint.
+release (M10). MLflow infrastructure is implemented for Day 36; its training/lifecycle integration and Airflow remain future work.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–35 are the implementation record. Unchecked future days below
+Completed Days 1–36 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–35 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–36 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -303,17 +303,20 @@ PostgreSQL remains authoritative and Kafka stays off the synchronous read path.
 
 ---
 
-## Week 7 — MLflow Experiment Tracking & Model Lifecycle (M7, planned)
+## Week 7 — MLflow Experiment Tracking & Model Lifecycle (M7, in progress)
 
 Build on Kafka's durable source/ingestion boundaries and the existing offline
 CLIs. MLflow records experiments and model versions; it does not replace ONNX
 Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 
-**Day 36 — MLflow infrastructure + storage ownership**
+**Day 36 — MLflow infrastructure + storage ownership ✅**
 
 - Add an optional Compose profile with a pinned MLflow server/client compatibility set, health check, dedicated PostgreSQL database/role, and persistent artifact storage. Keep the base Day 30 startup usable without MLflow.
 - Use a durable local artifact volume for the laptop profile; document the shared S3-compatible storage configuration and test it before claiming remote-worker support. Separate tracking metadata from artifact bytes.
 - Keep PYMK Flyway migrations separate from MLflow-owned metadata upgrades. Restrict the UI/network and credentials; test restart persistence and an upgrade/backup plan before accepting the infrastructure.
+- Implemented the opt-in `mlflow` profile, pinned server/client 3.17.1, dedicated metadata DB and restricted role, non-root loopback-only server and proxied artifact volume. Existing training and serving remain independent.
+- Added an isolated CI smoke for run/metric/artifact round trips, untrusted Host rejection, container recreation, coordinated backup/restore into fresh volumes and repeat same-version schema upgrade. See the [Day 36 runbook](DAY36_MLFLOW_INFRASTRUCTURE.md). Shared S3/remote workers and cross-version upgrades remain subject to deployment-specific tests.
+- Verified 2026-10-13: MLflow infrastructure/recovery smoke passed with original run identity and artifact checksum preserved; all 13 reactor projects, 263 Java tests, 57 Python tests and dependency checks passed. Packaged training/serving/cache/rollback and Kafka outage/recovery/restart checks passed with MLflow stopped. Existing serving and untracked training remain independent.
 
 **Day 37 — Reproducible tracking for existing ML commands**
 

@@ -26,6 +26,14 @@ jobs:
         shell: pwsh
         run: ./scripts/day31-kafka-smoke.ps1
 
+  mlflow-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify MLflow isolation, persistence and coordinated restore
+        shell: pwsh
+        run: ./scripts/day36-mlflow-smoke.ps1
+
   ml-training:
     runs-on: ubuntu-latest
     steps:

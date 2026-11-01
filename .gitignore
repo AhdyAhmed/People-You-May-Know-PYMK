@@ -24,6 +24,7 @@ logs/
 # Env / secrets
 .env
 .env.local
+.venv-mlflow/
 
 # Python (pymk-ml-training, Week 3+)
 pymk-ml-training/venv/

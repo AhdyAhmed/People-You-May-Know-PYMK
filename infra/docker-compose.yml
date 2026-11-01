@@ -1,9 +1,21 @@
-# PYMK local dev stack — Postgres/Redis plus optional Day 31 Kafka.
+# PYMK local dev stack — Postgres/Redis plus optional Kafka and MLflow.
 # Usage:
 #   docker compose -f infra/docker-compose.yml up -d
 #   docker compose -f infra/docker-compose.yml down          # stop
 #   docker compose -f infra/docker-compose.yml down -v       # stop + wipe data
 #   docker compose -f infra/docker-compose.yml --profile kafka up -d
+
+x-mlflow-runtime: &mlflow-runtime
+  image: pymk-mlflow:3.17.1
+  build: ./mlflow
+  profiles: [mlflow]
+  networks: [mlflow]
+  environment:
+    MLFLOW_DB_PASSWORD: ${PYMK_MLFLOW_DB_PASSWORD:-}
+    PYMK_MLFLOW_ORIGIN: http://127.0.0.1:${PYMK_MLFLOW_PORT:-5000}
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  mem_limit: 2g
 
 services:
   postgres:
@@ -85,7 +97,58 @@ services:
     volumes:
       - ./kafka/create-topics.sh:/pymk/create-topics.sh:ro
 
+  # Independent metadata cluster: no app credentials, host DB port or Flyway.
+  mlflow-db:
+    image: postgres:16.15-bookworm
+    profiles: [mlflow]
+    restart: unless-stopped
+    networks: [mlflow]
+    environment:
+      POSTGRES_USER: mlflow_admin
+      POSTGRES_DB: mlflow
+      POSTGRES_PASSWORD: ${PYMK_MLFLOW_ADMIN_PASSWORD:-}
+      MLFLOW_DB_PASSWORD: ${PYMK_MLFLOW_DB_PASSWORD:-}
+    volumes:
+      - pymk_mlflow_metadata:/var/lib/postgresql/data
+      - ./mlflow/init-db.sh:/docker-entrypoint-initdb.d/10-mlflow.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U mlflow_admin -d mlflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    mem_limit: 512m
+
+  mlflow-migrate:
+    <<: *mlflow-runtime
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    restart: "no"
+    command: [upgrade]
+
+  mlflow:
+    <<: *mlflow-runtime
+    depends_on:
+      mlflow-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PYMK_MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - pymk_mlflow_artifacts:/mlartifacts
+    healthcheck:
+      test: [CMD, python, /opt/pymk-mlflow/health.py]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+networks:
+  mlflow:
+
 volumes:
   pymk_postgres_data:
   pymk_redis_data:
   pymk_kafka_data:
+  pymk_mlflow_metadata:
+  pymk_mlflow_artifacts:

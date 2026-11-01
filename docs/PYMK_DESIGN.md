@@ -64,11 +64,12 @@ status differ.
 | Independent journal consumers, durable deduplication, bounded retries and DLT replay | Implemented Day 33; see `DAY33_EVENT_CONSUMERS.md` |
 | Live event windows, durable cache epochs and finite reconciliation | Implemented Day 34; see `DAY34_LIVE_FEATURES.md` |
 | Kafka restart resilience and operational metrics | Implemented Day 35; see `DAY35_KAFKA_OPERATIONS.md` |
-| MLflow experiment tracking, model registry and guarded release preparation | Planned for Days 36–40 (M7); section 7.3 |
+| MLflow infrastructure and persistent storage | Complete Day 36; `DAY36_MLFLOW_INFRASTRUCTURE.md` |
+| MLflow training integration, model registry contracts and guarded release preparation | Planned for Days 37–40 (M7); section 7.3 |
 | Airflow scheduling, safe backfills and restartable batch/ML workflows | Planned for Days 41–45 (M8); section 7.4 |
 | Unified operational dashboards and packaged portfolio release | Planned for M9–M10 |
 
-The current checkpoint is **Day 35 complete (M1–M6)**. Target-only sections below use
+The current checkpoint is **Day 36 complete (M1–M6 complete; M7 in progress)**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
@@ -134,9 +135,9 @@ flowchart LR
         GRAPH["Graph Index Builder - planned"]
     end
 
-    subgraph MLOps["MLOps control plane (planned after Kafka)"]
-        MLFLOW["MLflow Tracking and Registry - M7"]
-        ARTIFACTS[(Immutable Artifact Storage)]
+    subgraph MLOps["MLOps control plane (infrastructure Day 36, integration planned)"]
+        MLFLOW["MLflow Server - Day 36; Training Integration Planned"]
+        ARTIFACTS["Persistent Artifact Storage - Immutability Gates Planned"]
         AIRFLOW["Airflow Scheduler - M8"]
         PROMOTE["Validated Staging and Approved Rollout"]
     end
@@ -188,11 +189,11 @@ flowchart LR
     INVALIDATE -->|"retry exhausted"| DLT
 ```
 
-Ranking stages run in-process behind Java interfaces at the Day 35 checkpoint;
+Ranking stages run in-process behind Java interfaces at the Day 36 checkpoint;
 L2 and re-ranking are opt-in. Dashed edges denote planned
 orchestration/tracking, not request-time dependencies. Ingestion/outbox publishing
 and independent durable consumers with live feature/cache projections are implemented.
-MLOps remains future work. The current manual artifact/release
+MLflow infrastructure exists independently; MLOps integration remains future work. The current manual artifact/release
 workflow remains usable without those additions.
 MLflow aliases never replace the PostgreSQL release pointer, and Airflow schedules
 finite jobs rather than running continuous Kafka consumers. Section 7.3 defines
@@ -214,7 +215,7 @@ a separate microservice.
 | Caching | Spring Data Redis | Cache L0 candidate sets and final PYMK lists (TTL) |
 | Batch / ETL | Spring Batch | Implemented restartable jobs; automatic schedules arrive in M8 |
 | Async / messaging (M6) | Apache Kafka 3.9.1 + Spring Kafka | Outbox, consumers, DLT recovery, live windows, cache epochs, restart resilience and Micrometer monitoring through Day 35 |
-| Experiment/model lifecycle (planned M7) | MLflow Tracking + Model Registry | PostgreSQL metadata, persistent artifact storage, exact model versions and auditable release preparation |
+| Experiment/model lifecycle (M7) | MLflow 3.17.1 Tracking + Model Registry | Day 36 isolated PostgreSQL metadata and persistent proxied artifacts; training/registry/promotion contracts planned Days 37–40 |
 | Workflow orchestration (planned M8) | Apache Airflow | Schedules existing Spring Batch/Python jobs; independent metadata and bounded worker resources |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
 | Vector similarity | pgvector extension on Postgres | Embedding-based retrieval (EBR) candidate source |
@@ -245,7 +246,7 @@ pymk/
 ├── pymk-datagen/             # one-off synthetic dataset generator for local development
 ├── pymk-ml-training/         # Python CLIs and artifacts; MLflow adapters planned M7
 ├── orchestration/airflow/    # thin DAGs, job adapters and tests (planned M8; not a Maven module)
-├── infra/                    # Compose/init SQL; optional MLflow/Airflow profiles planned M7/M8
+├── infra/                    # Compose/init SQL; optional Kafka + MLflow; Airflow planned M8
 └── docs/
     └── PYMK_DESIGN.md (this file)
 ```
@@ -875,7 +876,7 @@ from the historical training snapshot and cannot rewrite its leakage boundary.
 Broker outages leave valid active serving features usable while outbox backlog
 and freshness lag remain observable.
 
-### 7.3 MLflow experiment and model lifecycle (planned M7, Days 36–40)
+### 7.3 MLflow experiment and model lifecycle (infrastructure Day 36; integration planned Days 37–40)
 
 MLflow follows Kafka in delivery order, but tracks finite offline work rather
 than consuming every event. It adds searchable experiments and registered model
@@ -885,9 +886,9 @@ serving is not part of this design. MLflow's tracking primitives cover runs,
 parameters, metrics and artifacts; the PYMK contracts below add domain-specific
 lineage and promotion gates. See [MLflow Tracking](https://www.mlflow.org/docs/latest/tracking/).
 
-**Storage and ownership.** Use an optional, version-pinned MLflow Compose profile,
+**Storage and ownership (implemented Day 36).** The optional, version-pinned MLflow Compose profile uses
 a dedicated PostgreSQL database/role for tracking/registry metadata, and persistent
-artifact storage. Start with a durable local artifact volume; require a tested
+artifact storage. It uses a durable local artifact volume; require a tested
 shared S3-compatible configuration before distributing workers. Metadata and
 artifact bytes need coordinated backup/restore; neither alone reproduces a run.
 The registry requires a database-backed store. PYMK Flyway continues to own only
@@ -895,7 +896,17 @@ application schemas (including existing Spring Batch metadata); MLflow's own
 migration tooling owns its metadata. See [backend stores](https://mlflow.org/docs/latest/self-hosting/architecture/backend-store/)
 and [artifact stores](https://mlflow.org/docs/latest/self-hosting/architecture/artifact-store/).
 
-**Tracked work.** Integrate explicit tracking with profile-transform fitting,
+The local profile pins MLflow server/client 3.17.1, runs as a non-root UID and
+publishes only loopback HTTP. The metadata DB has no published port, a separate
+network and a non-superuser runtime role. `mlflow-migrate` owns schema upgrades;
+health includes HTTP plus migrated-DB connectivity. Artifacts are proxied through
+HTTP, not exposed as client-local paths. The Day 36 smoke tests writes, container
+recreation and paired metadata/artifact restoration into fresh volumes. No shared
+S3/remote-worker or cross-version-upgrade certification is claimed. See the
+[Day 36 runbook](DAY36_MLFLOW_INFRASTRUCTURE.md) for credentials, security limits,
+backup/upgrade procedure and acceptance evidence.
+
+**Tracked work (planned from Day 37).** Integrate explicit tracking with profile-transform fitting,
 L1/L2 training, frozen evaluation and blend tuning. Keep the current untracked
 CLI mode usable and numerically identical. Each logical run records:
 
@@ -1162,7 +1173,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
 5. **M5 — Re-ranker**: blending + exposure diversification, validation-only Bayesian weight tuning, immutable configuration/report artifacts and a seeded-to-packaged-HTTP rollback demo are **complete through Day 30**. No automatic production promotion or causal lift is claimed.
 6. **M6 — Kafka event backbone (complete through Day 35)**: infrastructure/contracts, ingestion/outbox, independent consumers, retries/DLT replay, live windows, cache epochs, finite reconciliation, restart resilience and operational metrics implemented and verified. See the Day 35 runbook for regression and packaged-application evidence.
-7. **M7 — MLflow experiment and model lifecycle (Days 36–40, planned)**: tracked reproducible runs, persistent artifact storage, exact registered ONNX versions, guarded model-sync/release preparation and outage/restore verification.
+7. **M7 — MLflow experiment and model lifecycle (in progress)**: Day 36 infrastructure, persistent storage and coordinated recovery verified. Training integration, exact registered ONNX versions, guarded model-sync/release preparation and lifecycle recovery remain Days 37–40.
 8. **M8 — Airflow orchestration + batch operations (Days 41–45, planned)**: schedule existing jobs, mature-data dependencies, bounded retries, stable work identities, Kafka reconciliation, safe backfills and controlled release workflows.
 9. **M9 — Observability + offline eval dashboard (planned)**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, MLflow/Airflow operational visibility, and Recall@k tracking over time.
 10. **M10 — Polish for portfolio (planned)**: one-command lightweight/full Kafka/MLflow/Airflow Compose profiles, architecture/runbook documentation, load-test evidence, sample requests, recovery drills and reproducible offline evaluation.

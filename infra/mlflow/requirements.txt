@@ -1,0 +1,5 @@
+# Server and infrastructure smoke client share this exact MLflow version.
+# Deliberately isolated from pymk-ml-training until Day 37.
+mlflow==3.17.1
+psycopg2-binary==2.9.13
+boto3==1.42.49

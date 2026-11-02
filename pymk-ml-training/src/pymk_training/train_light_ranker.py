@@ -252,7 +252,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
         onnx_path, metadata_path, metadata = train_and_export(
@@ -270,6 +270,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Metadata:   {metadata_path}")
     print(json.dumps(metadata["metrics"], indent=2, sort_keys=True))
     return 0
+
+
+def main(argv=None):
+    from pymk_training.tracking import cli
+    return cli("light", argv, _main)
 
 
 if __name__ == "__main__":

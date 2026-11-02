@@ -291,19 +291,25 @@ def evaluate(inputs, model_path, metadata_path, l1_model, l1_metadata, policy_pa
     return report
 
 
-def main():
+def _main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input',action='append',required=True,type=Path)
     for name in ('model','metadata','l1-model','l1-metadata','policy','output'):
         parser.add_argument('--'+name,required=True,type=Path)
     parser.add_argument('--context',type=Path)
     parser.add_argument('--require-quality-gate',action='store_true')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = evaluate(args.input,args.model,args.metadata,args.l1_model,args.l1_metadata,args.policy,args.output,args.context)
     print(json.dumps({'report':str(args.output),'qualityGate':report['qualityGate']},indent=2))
     if args.require_quality_gate and report['qualityGate']['status'] != 'met':
-        raise SystemExit(2)
+        from .tracking import QualityGateNotMet
+        raise QualityGateNotMet(2)
+
+
+def main(argv=None):
+    from pymk_training.tracking import cli
+    return cli("evaluate", argv, _main)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

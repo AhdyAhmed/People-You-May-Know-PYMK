@@ -49,7 +49,11 @@ jobs:
       - name: Install ML training project
         run: |
           python -m pip install --disable-pip-version-check 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install --disable-pip-version-check -e 'pymk-ml-training[heavy]'
+          python -m pip install --disable-pip-version-check -e 'pymk-ml-training[heavy,tracking]'
 
       - name: Test temporal training, both ONNX models, embeddings and v2 datasets
         run: python -W error -m unittest discover -s pymk-ml-training/tests -v
+
+      - name: Verify opt-in tracking, unchanged numeric outputs and outage recovery
+        shell: pwsh
+        run: ./scripts/day37-tracking-smoke.ps1 -Python python

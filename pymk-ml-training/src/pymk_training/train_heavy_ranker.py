@@ -232,7 +232,7 @@ def train_and_export(inputs, output_dir, model_version, embedding_transform, l1_
     return model_path, metadata_path, metadata
 
 
-def main():
+def _main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", action="append", required=True, type=Path)
     for name in ("output-dir", "embedding-transform", "l1-model", "l1-metadata"):
@@ -242,7 +242,7 @@ def main():
     parser.add_argument("--hidden-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     model, metadata, report = train_and_export(args.input, args.output_dir, args.model_version,
                                              args.embedding_transform, args.l1_model, args.l1_metadata,
                                              args.epochs, args.hidden_size, args.learning_rate, args.seed)
@@ -250,5 +250,10 @@ def main():
     print(json.dumps({"metrics": report["metrics"], "comparison": report["comparison"]}, indent=2))
 
 
+def main(argv=None):
+    from pymk_training.tracking import cli
+    return cli("heavy", argv, _main)
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

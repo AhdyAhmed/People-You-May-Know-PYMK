@@ -223,15 +223,20 @@ def tune(inputs, model, metadata_path, l1_model, l1_metadata, policy_path, conte
     return report
 
 
-def main():
+def _main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input',action='append',required=True,type=Path)
     for name in ('model','metadata','l1-model','l1-metadata','policy','context','output-dir'):
         parser.add_argument('--'+name,required=True,type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = tune(args.input,args.model,args.metadata,args.l1_model,args.l1_metadata,args.policy,args.context,args.output_dir)
     print(json.dumps({'output':str(args.output_dir),'selected':report['selected'],'automaticPromotion':False},indent=2))
 
 
+def main(argv=None):
+    from pymk_training.tracking import cli
+    return cli("blend", argv, _main)
+
+
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

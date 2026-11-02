@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 36 complete (M1–M6 complete; M7 in progress).
+**Current checkpoint:** Day 37 complete (M1–M6 complete; M7 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Day 36 MLflow infrastructure and coordinated recovery are verified. Day 37 tracking integration is next.
+Day 36 MLflow infrastructure/recovery and Day 37 opt-in tracking/publication recovery are verified. Day 38 registry contracts are next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow infrastructure is implemented for Day 36; its training/lifecycle integration and Airflow remain future work.
+release (M10). MLflow infrastructure and opt-in tracking are implemented through Day 37; registry/promotion integration and Airflow remain future work.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -318,11 +318,13 @@ Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 - Added an isolated CI smoke for run/metric/artifact round trips, untrusted Host rejection, container recreation, coordinated backup/restore into fresh volumes and repeat same-version schema upgrade. See the [Day 36 runbook](DAY36_MLFLOW_INFRASTRUCTURE.md). Shared S3/remote workers and cross-version upgrades remain subject to deployment-specific tests.
 - Verified 2026-10-13: MLflow infrastructure/recovery smoke passed with original run identity and artifact checksum preserved; all 13 reactor projects, 263 Java tests, 57 Python tests and dependency checks passed. Packaged training/serving/cache/rollback and Kafka outage/recovery/restart checks passed with MLflow stopped. Existing serving and untracked training remain independent.
 
-**Day 37 — Reproducible tracking for existing ML commands**
+**Day 37 — Reproducible tracking for existing ML commands ✅**
 
-- Add explicit tracking integration to profile-transform fitting, L1/L2 training, frozen evaluation and blend tuning without changing their numerical results or default CLI behavior.
-- Log code/build identity, dependency versions, seed, parameters, source/knowledge cutoffs, dataset/cohort/split hashes, release IDs, metrics and checksum-bound output references. Record failed runs and `not_met` gates; unavailable metrics remain unavailable, not zero.
-- Use stable logical experiment identities with linked retry attempts; keep raw member data and secrets out of parameters/tags. Test offline/untracked mode, resumed publication and tracking failure without silently reporting a fully published run.
+- Implemented explicit `--tracking-dir` / `--tracking-uri` integration for profile-transform fitting, L1/L2 training, frozen evaluation and blend tuning. Default CLIs stay independent of MLflow; parity checks preserve numerical outputs.
+- Captured source/build digest, runtime/dependency versions, seeds/parameters, available source/knowledge cutoffs and release lineage, dataset/cohort/split hashes, aggregate metrics and checksum-bound output references. Failed computations and `not_met` gates remain failures; undefined metrics remain unavailable.
+- Added stable logical experiment identities and linked retry attempts, private local path bindings, filtered remote manifests, exclusive publication locks, destination pinning and checksum read-back. Acknowledged retries are no-ops; ambiguous network failures can leave duplicate remote attempts and are not claimed as exactly-once delivery.
+- Publication writes are explicitly synchronous even with SDK async logging enabled. Outages return nonzero without corrupting local outputs; the separate publisher resumes without retraining. No registration or promotion is performed on Day 37.
+- Verified **2026-10-14**: **263 Java tests**, **74 Python tests** (warnings treated as errors), clean dependency check, real MLflow runs for all five workflows including failed/not_met cases, outage/restart/republication, and full packaged serving/Kafka/blend regression. See the [Day 37 runbook](DAY37_EXPERIMENT_TRACKING.md).
 
 **Day 38 — Immutable artifacts + model registry contracts**
 

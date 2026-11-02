@@ -5,7 +5,8 @@
 The optional `mlflow` Compose profile adds a working tracking UI/API, PostgreSQL
 metadata and proxied persistent artifact storage. It does **not** automatically
 track existing training commands, register serving models, promote releases or
-change recommendation behavior. Those integrations are Days 37–40. Java serving
+change recommendation behavior. Opt-in tracking is now implemented in
+[Day 37](DAY37_EXPERIMENT_TRACKING.md); registry/promotion remain Days 38–40. Java serving
 still uses validated ONNX artifacts and the PostgreSQL release pointer; it never
 calls MLflow. The base Compose profile remains PostgreSQL + Redis only.
 

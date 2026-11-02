@@ -212,7 +212,7 @@ class ProfileEmbeddingTransform:
             raise ValueError("invalid embedding transform document") from error
 
 
-def main(argv=None):
+def _main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--artifact", type=Path, required=True)
@@ -251,5 +251,10 @@ def main(argv=None):
     print(f"Exported {len(rows)} finite {DIMENSIONS}-dimensional vectors to {args.output}")
 
 
+def main(argv=None):
+    from pymk_training.tracking import cli
+    return cli("profile", argv, _main)
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

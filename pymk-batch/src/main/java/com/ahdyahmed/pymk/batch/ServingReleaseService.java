@@ -28,6 +28,11 @@ public class ServingReleaseService {
         lock(expectedEpoch);
         staging.lockSources();
         var release = jdbc.queryForMap("SELECT * FROM pymk_serving_releases WHERE release_id = ? FOR UPDATE", id);
+        JsonNode releaseManifest = EmbeddingReleaseManifest.JSON.readTree(release.get("manifest").toString());
+        RegistryReleaseContract.validate(releaseManifest);
+        if (releaseManifest.path("schemaVersion").asInt() == 2) {
+            throw new IllegalArgumentException("Registry-backed activation requires the guarded model-sync and approval workflow; registration is not promotion");
+        }
         if (!"STAGED".equals(release.get("state")) && !"READY".equals(release.get("state"))) throw new IllegalStateException("Release is not fully staged");
         if (!staging.revision().equals(release.get("source_fingerprint"))) throw new IllegalStateException("Source changed since staging; rebuild before activation");
         Instant snapshot = ((Timestamp) release.get("feature_as_of")).toInstant();

@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 37 complete (M1–M6 complete; M7 in progress).
+**Current checkpoint:** Day 38 complete (M1–M6 complete; M7 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Day 36 MLflow infrastructure/recovery and Day 37 opt-in tracking/publication recovery are verified. Day 38 registry contracts are next.
+Day 36 MLflow infrastructure/recovery, Day 37 opt-in tracking/publication recovery and Day 38 exact registry contracts are verified. Day 39 guarded promotion/model synchronization is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow infrastructure and opt-in tracking are implemented through Day 37; registry/promotion integration and Airflow remain future work.
+release (M10). MLflow infrastructure, opt-in tracking and exact registry candidates are implemented through Day 38; guarded promotion/model synchronization and Airflow remain future work.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–36 are the implementation record. Unchecked future days below
+Completed Days 1–38 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–36 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–38 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -326,11 +326,14 @@ Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 - Publication writes are explicitly synchronous even with SDK async logging enabled. Outages return nonzero without corrupting local outputs; the separate publisher resumes without retraining. No registration or promotion is performed on Day 37.
 - Verified **2026-10-14**: **263 Java tests**, **74 Python tests** (warnings treated as errors), clean dependency check, real MLflow runs for all five workflows including failed/not_met cases, outage/restart/republication, and full packaged serving/Kafka/blend regression. See the [Day 37 runbook](DAY37_EXPERIMENT_TRACKING.md).
 
-**Day 38 — Immutable artifacts + model registry contracts**
+**Day 38 — Immutable artifacts + model registry contracts ✅**
 
 - Register exact L1/L2 ONNX versions only after upload/read-back checksum and metadata/tensor/parity validation. Attach transform, dataset, evaluation and blend artifacts as lineage, not as independently interchangeable serving models.
 - Extend the release manifest with run IDs, registry name/version, artifact URI and digests while retaining all existing feature/embedding/model compatibility fields. Version the extension and keep existing Day 30 manifests usable.
 - Use aliases/tags for human discovery, not deprecated registry stages or live serving resolution. Test interrupted uploads, mismatched files, reused output versions and alias movement after staging; none may change the pinned candidate or active release.
+- Implemented `pymk-model-registry prepare/publish/extend-release`: embedded ONNX only, deterministic Python/production-Java parity, exact-byte model identity claims, acknowledged read-back and numeric registry version pins. Dataset descriptors exclude raw CSVs; full transform/evaluation/blend artifacts require restricted access.
+- Schema-1 remains supported; schema-2 candidates stage with validated compatibility but cannot activate before Day 39's guarded approval/model-sync workflow. Lost version-creation acknowledgments can leave orphan versions; retries never claim exactly-once registration.
+- Verified **2026-10-14**: **267 Java tests**, **94 Python tests** (warnings treated as errors), clean dependency check, real L1/L2 registry upload/retry/alias/corruption checks, and full packaged serving, rollback, blend and Kafka recovery regression. See the [Day 38 runbook](DAY38_MODEL_REGISTRY.md).
 
 **Day 39 — Guarded promotion + model synchronization**
 

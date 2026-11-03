@@ -19,7 +19,7 @@ public record EmbeddingReleaseManifest(String id, Instant snapshot, Path vectors
             Path path = Path.of(name).toAbsolutePath().normalize();
             byte[] bytes = Files.readAllBytes(path);
             JsonNode root = JSON.readTree(bytes);
-            if (root.path("schemaVersion").asInt() != 1) throw new IllegalArgumentException("Manifest schemaVersion must be 1");
+            RegistryReleaseContract.validate(root);
             String id = root.path("releaseId").asText();
             requireId(id);
             Instant snapshot = Instant.parse(root.path("featureAsOf").asText());
@@ -36,6 +36,15 @@ public record EmbeddingReleaseManifest(String id, Instant snapshot, Path vectors
             if ("placeholder-v1".equals(version) || metadata.path("dimensions").asInt() != 128
                     || metadata.path("schemaVersion").asInt() != 1 || cutoff.isAfter(snapshot)) {
                 throw new IllegalArgumentException("Incompatible profile transform");
+            }
+            if (root.path("schemaVersion").asInt() == 2) {
+                for (var model : root.path("registry").path("models")) {
+                    var compatibility = model.path("compatibility");
+                    if (!version.equals(compatibility.path("embeddingVersion").asText())
+                            || !cutoff.equals(Instant.parse(compatibility.path("fitCutoff").asText()))) {
+                        throw new IllegalArgumentException("Registry embedding identity/cutoff mismatch");
+                    }
+                }
             }
             return new EmbeddingReleaseManifest(id, snapshot, vectors, transform, vectorsHash,
                     transformHash, sha256(bytes), root, version, cutoff);

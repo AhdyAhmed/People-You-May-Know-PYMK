@@ -118,7 +118,8 @@ gate from a generic argument/computation failure.
   do not alter saved hashes to bypass validation.
 
 No ONNX upload, model registration, alias changes, release preparation or automatic
-promotion happens on Day 37. Those remain Days 38–40. A tracked successful run is
+promotion happens on Day 37. The separate [Day 38 adapter](DAY38_MODEL_REGISTRY.md)
+adds exact registry candidates; guarded promotion remains Days 39–40. A tracked successful run is
 not production approval, and the serving database pointer remains authoritative.
 
 ## Verification
@@ -161,4 +162,5 @@ Top-level local logs are `artifacts/day37-verify.log`,
 `artifacts/day37-python-final.log`, `artifacts/day37-tracking-smoke.log` and
 `artifacts/day37-serving-smoke.log`. Generated evidence is intentionally ignored
 by Git. These checks do not certify shared remote workers or guarantee absence
-of every possible defect; registry/promotion acceptance remains Days 38–40.
+of every possible defect. Subsequent registry acceptance is recorded in the
+[Day 38 runbook](DAY38_MODEL_REGISTRY.md); promotion remains Days 39–40.

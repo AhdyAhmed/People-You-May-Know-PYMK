@@ -57,3 +57,17 @@ jobs:
       - name: Verify opt-in tracking, unchanged numeric outputs and outage recovery
         shell: pwsh
         run: ./scripts/day37-tracking-smoke.ps1 -Python python
+
+      - name: Set up JDK for production registry parity verifier
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Package production Java registry verifier
+        run: mvn -B -ntp -pl pymk-batch -am -DskipTests package
+
+      - name: Verify exact registry versions and immutable release references
+        shell: pwsh
+        run: ./scripts/day38-registry-smoke.ps1 -Python python

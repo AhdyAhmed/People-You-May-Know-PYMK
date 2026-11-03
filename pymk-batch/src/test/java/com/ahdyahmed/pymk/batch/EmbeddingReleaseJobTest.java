@@ -117,6 +117,19 @@ class EmbeddingReleaseJobTest {
     }
 
     @Test
+    void registryManifestStagesButCannotBypassGuardedPromotion() throws Exception {
+        Path file = manifest("registry-candidate", LIVE, 4);
+        var document = (com.fasterxml.jackson.databind.node.ObjectNode) EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(file));
+        RegistryReleaseContractTest.attach(document);
+        Files.write(file, EmbeddingReleaseManifest.JSON.writeValueAsBytes(document));
+        assertThat(run(file, 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThatThrownBy(() -> publisher.activate("registry-candidate", 0, model, baselineMetadata, model, baselineMetadata))
+                .hasMessageContaining("registration is not promotion");
+        assertThat(store.current().managed()).isFalse();
+        assertThat(store.current().epoch()).isZero();
+    }
+
+    @Test
     void resumesAfterACommittedMemberChunkAndRejectsChangedInputs() throws Exception {
         Path manifest = manifest("restart", LIVE, 4);
         AtomicBoolean fail = new AtomicBoolean(true);

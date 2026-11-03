@@ -6,11 +6,11 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 37 complete (M1–M6 complete, M7 in progress).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 38 complete (M1–M6 complete, M7 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > Kafka ingestion/outbox, independently deduplicated journal consumers, bounded retries and acknowledged dead-letter recovery are implemented.
 > Live feature windows, durable cache invalidation, finite reconciliation and Kafka monitoring are implemented and verified. Optional MLflow infrastructure and opt-in tracking for all five ML workflows are verified.
-> MLflow registry/promotion integration (Days 38–40), Airflow (M8, Days 41–45), unified dashboards and packaging (M9–M10) remain planned.
+> Exact MLflow registry versions and checksum-bound release manifests are implemented and verified. Guarded model synchronization/promotion (Days 39–40), Airflow (M8, Days 41–45), unified dashboards and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 37 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 38 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -241,7 +241,7 @@ dedicated PostgreSQL metadata database and persistent HTTP-proxied artifacts.
 It requires separate generated database credentials; follow the
 [Day 36 setup and recovery runbook](docs/DAY36_MLFLOW_INFRASTRUCTURE.md).
 Existing untracked training commands and Java serving do not depend on MLflow.
-Registry-backed release preparation and promotion remain Days 38–40.
+Registry-backed synchronization and promotion remain Days 39–40.
 Run `./scripts/day36-mlflow-smoke.ps1` for isolated persistence and backup/restore
 verification; the default Compose profile remains PostgreSQL + Redis.
 
@@ -253,9 +253,21 @@ tuning) accept `--tracking-dir artifacts/tracking` for offline evidence; add
 package extra. Tracking preserves numerical outputs and records source/dependency
 identity, lineage, aggregate metrics, failed gates and output checksums.
 Publication outages return nonzero and retain outputs; `pymk-publish-tracking`
-resumes without retraining. No model registration or promotion occurs.
+resumes without retraining. Tracking itself does not register or promote models.
 See the [Day 37 runbook](docs/DAY37_EXPERIMENT_TRACKING.md) for setup, privacy,
 recovery and `./scripts/day37-tracking-smoke.ps1` verification.
+
+### Day 38 exact model registry and pinned release evidence
+
+`python -m pymk_training.registry` prepares immutable L1/L2 bundles, invokes the
+production Java model loaders for parity validation, uploads and reads back every
+artifact checksum, and registers exact MLflow versions. It preserves ONNX bytes
+and includes transform/dataset/evaluation/blend lineage. Schema-2 release manifests
+pin numeric registry versions and hashes; aliases cannot change their meaning.
+Schema-1 releases still work. Registry registration never activates serving, and
+schema-2 activation is blocked pending Day 39's guarded approval/model-sync workflow.
+See the [Day 38 runbook](docs/DAY38_MODEL_REGISTRY.md) and
+`./scripts/day38-registry-smoke.ps1` for commands and real-server verification.
 
 ## Data model & how to seed the DB
 
@@ -339,7 +351,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M7 - Day 37: Reproducible experiment tracking","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M7 - Day 38: Immutable artifacts and model registry","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -732,7 +744,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 35 — Kafka resilience and observability**: publishing/processing metrics, cached backlog/lag/freshness gauges, restart resilience and operational runbook. Verified 2026-10-13: 263 Java tests, 57 Python tests and packaged outage/recovery/restart smoke passed. See the [Day 35 runbook](docs/DAY35_KAFKA_OPERATIONS.md).
 - [x] **Day 36 — MLflow infrastructure and storage**: optional profile, isolated metadata, persistent proxied artifacts and coordinated recovery test. Verified 2026-10-13: restart/restore smoke, 263 Java tests, 57 Python tests and packaged serving regression passed. See the [Day 36 runbook](docs/DAY36_MLFLOW_INFRASTRUCTURE.md).
 - [x] **Day 37 — Reproducible experiment tracking**: opt-in tracking for five ML workflows, privacy-filtered evidence, offline bundles and acknowledged retry publication. Verified 2026-10-14: 263 Java tests, 74 Python tests, real MLflow outage/recovery and full packaged serving regression passed. See the [Day 37 runbook](docs/DAY37_EXPERIMENT_TRACKING.md).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 38 is next.
+- [x] **Day 38 — Immutable artifacts and model registry**: exact L1/L2 registry versions, production Java parity, checksum-verified uploads and schema-2 pinned release evidence. Verified 2026-10-14: 267 Java tests, 94 Python tests, live registry recovery/corruption checks and full packaged serving/Kafka regression passed. See the [Day 38 runbook](docs/DAY38_MODEL_REGISTRY.md).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 39 is next.
 
 ## License
 

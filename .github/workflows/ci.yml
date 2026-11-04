@@ -68,6 +68,6 @@ jobs:
       - name: Package production Java registry verifier
         run: mvn -B -ntp -pl pymk-batch -am -DskipTests package
 
-      - name: Verify exact registry versions and immutable release references
+      - name: Verify exact registry versions, immutable release references and model synchronization
         shell: pwsh
         run: ./scripts/day38-registry-smoke.ps1 -Python python

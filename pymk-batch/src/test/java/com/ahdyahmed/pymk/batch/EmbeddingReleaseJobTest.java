@@ -46,6 +46,7 @@ class EmbeddingReleaseJobTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired ServingReleaseService publisher;
     @Autowired ServingReleaseStore store;
+    @Autowired java.time.Clock clock;
     @Autowired PlatformTransactionManager transactions;
     @MockitoSpyBean PairFeatureComputer computer;
     @TempDir Path directory;
@@ -147,6 +148,110 @@ class EmbeddingReleaseJobTest {
         Files.writeString(directory.resolve("restart.csv"), "changed");
         assertThat(run(manifest, 2).getStatus()).isEqualTo(BatchStatus.FAILED);
         assertThat(store.current().epoch()).isZero();
+    }
+
+    @Test
+    void approvedRegistryActivationAuditsAndRejectsReplayWithL1Rollback() throws Exception {
+        Path stage = promotionStage();
+        var now = clock.instant();
+        PromotionApproval.approve(stage, stage.resolve("evidence.json"), "test-operator", 0, now.plusSeconds(3600), now);
+        assertThat(run(stage.resolve("release.json"), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        var activation = launcher.run(releaseJob, new JobParametersBuilder()
+                .addString("releaseId", "approved").addString("action", "activate-approved")
+                .addString("expectedEpoch", "0").addString("stagePath", stage.toString())
+                .addString("legacyModelPath", model.toString()).addString("legacyMetadataPath", baselineMetadata.toString())
+                .toJobParameters());
+        assertThat(activation.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(store.current().id()).isEqualTo("approved");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_promotion_audit", Long.class)).isEqualTo(1);
+        assertThatThrownBy(() -> publisher.activateApproved("approved", 0, stage, model, baselineMetadata)).hasMessageContaining("Stale expectedEpoch");
+        assertThatThrownBy(() -> publisher.activateApproved("approved", 1, stage, model, baselineMetadata)).hasMessageContaining("Stale approval");
+        publisher.rollback("legacy", 1);
+        assertThat(store.current().managed()).isFalse();
+        assertThat(store.current().epoch()).isEqualTo(2);
+    }
+
+    @Test
+    void approvalRejectsFailedGatesExpiryAndAlteredDeployment() throws Exception {
+        Path stage = promotionStage();
+        var now = clock.instant();
+        var evidence = (com.fasterxml.jackson.databind.node.ObjectNode) EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(stage.resolve("evidence.json")));
+        for (String gate : new String[]{"coverage", "quality", "requesters", "coldP95Ms", "warmP95Ms"}) {
+            var broken = evidence.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode) broken.path(gate)).put("observed", gate.endsWith("Ms") ? 99999 : 0);
+            Files.write(stage.resolve("bad.json"), EmbeddingReleaseManifest.JSON.writeValueAsBytes(broken));
+            assertThatThrownBy(() -> PromotionApproval.approve(stage, stage.resolve("bad.json"), "test-operator", 0, now.plusSeconds(60), now)).hasMessageContaining("gate");
+        }
+        PromotionApproval.approve(stage, stage.resolve("evidence.json"), "test-operator", 0, now.plusSeconds(60), now);
+        assertThatThrownBy(() -> PromotionApproval.verify(stage, 0, now.plusSeconds(61))).hasMessageContaining("Expired");
+        Files.writeString(stage.resolve("deployment.properties"), "changed");
+        assertThatThrownBy(() -> PromotionApproval.verify(stage, 0, now)).hasMessageContaining("SHA-256 mismatch");
+        assertThat(store.current().epoch()).isZero();
+    }
+
+    @Test
+    void changedApprovedModelCannotReachActivePointer() throws Exception {
+        Path stage = promotionStage();
+        var now = clock.instant();
+        PromotionApproval.approve(stage, stage.resolve("evidence.json"), "test-operator", 0, now.plusSeconds(3600), now);
+        assertThat(run(stage.resolve("release.json"), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        Files.writeString(stage.resolve("light/model.onnx"), "corrupt");
+        assertThatThrownBy(() -> publisher.activateApproved("approved", 0, stage, model, baselineMetadata)).hasMessageContaining("SHA-256 mismatch");
+        assertThat(store.current().epoch()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_promotion_audit", Long.class)).isZero();
+    }
+
+    private Path promotionStage() throws Exception {
+        assertThat(run(manifest("approval-history", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        Path meta = releaseMetadata("example-v1", "approval-history");
+        Path stage = Files.createDirectory(directory.resolve("synced"));
+        Path light = Files.createDirectory(stage.resolve("light"));
+        Files.copy(model, light.resolve("model.onnx"));
+        Files.copy(meta, light.resolve("metadata.json"));
+        Files.copy(transform, light.resolve("transform.json"));
+        var fixture = EmbeddingReleaseManifest.JSON.createObjectNode().put("kind", "light");
+        float[][] rows = new float[][]{new float[6], {1,1,0,0,.5f,0}, {2,0,1,0,.3f,1}, {3,0,0,1,-.1f,2}};
+        fixture.set("features", EmbeddingReleaseManifest.JSON.valueToTree(rows));
+        var expected = fixture.putArray("expected");
+        try (var loaded = com.ahdyahmed.pymk.lightranker.OnnxLightRankerModel.load(Files.readAllBytes(model), EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(meta)))) {
+            for (float value : loaded.score(rows)) expected.addArray().add(value);
+        }
+        Files.write(light.resolve("parity.json"), EmbeddingReleaseManifest.JSON.writeValueAsBytes(fixture));
+        RegistryModelVerifier.verify(light, light.resolve("java-validation.json"));
+        Files.writeString(light.resolve("dataset.json"), "{}");
+        Files.writeString(light.resolve("tracking.json"), "{}");
+        var release = (com.fasterxml.jackson.databind.node.ObjectNode) EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(manifest("approved", LIVE, 4)));
+        Files.copy(Path.of(release.path("vectorsPath").asText()), stage.resolve("vectors.csv"));
+        Files.copy(transform, stage.resolve("transform.json"));
+        release.put("vectorsPath", stage.resolve("vectors.csv").toString()).put("transformPath", stage.resolve("transform.json").toString());
+        RegistryReleaseContractTest.attach(release);
+        var inventory = EmbeddingReleaseManifest.JSON.createObjectNode();
+        var pinned = (com.fasterxml.jackson.databind.node.ObjectNode) release.at("/registry/models/light/files");
+        try (var files = Files.list(light)) {
+            for (Path file : files.toList()) {
+                String digest = EmbeddingReleaseManifest.fileHash(file);
+                pinned.put(file.getFileName().toString(), digest);
+                inventory.put("light/" + file.getFileName(), digest);
+            }
+        }
+        Files.write(stage.resolve("release.json"), EmbeddingReleaseManifest.JSON.writeValueAsBytes(release));
+        for (String file : new String[]{"release.json", "vectors.csv", "transform.json"}) inventory.put(file, EmbeddingReleaseManifest.fileHash(stage.resolve(file)));
+        var sync = EmbeddingReleaseManifest.JSON.createObjectNode().put("schemaVersion", 1);
+        sync.set("files", inventory);
+        Files.write(stage.resolve("sync.json"), EmbeddingReleaseManifest.JSON.writeValueAsBytes(sync));
+        Files.writeString(stage.resolve("deployment.properties"), "pymk.serving.ranker=L1\npymk.heavy-ranker.enabled=false\npymk.light-ranker.max-candidates=500\npymk.heavy-ranker.max-candidates=500\n");
+        Files.copy(stage.resolve("deployment.properties"), stage.resolve("rollback.properties"));
+        var evidence = EmbeddingReleaseManifest.JSON.createObjectNode().put("schemaVersion", 1)
+                .put("manifestSha256", EmbeddingReleaseManifest.fileHash(stage.resolve("release.json")))
+                .put("measuredAt", clock.instant().toString()).put("environment", "isolated Java integration fixture")
+                .put("cohortSha256", "a".repeat(64)).put("mode", "L1").put("temporalValid", true).put("rollbackVerified", true);
+        evidence.putObject("coverage").put("observed", 1).put("minimum", 1);
+        evidence.putObject("quality").put("observed", .9).put("minimum", .7);
+        evidence.putObject("requesters").put("observed", 50).put("minimum", 30);
+        for (String latency : new String[]{"coldP95Ms", "warmP95Ms"}) evidence.putObject(latency).put("observed", 10).put("maximum", 200);
+        for (String config : new String[]{"deployment.properties", "rollback.properties"}) evidence.put(config + "Sha256", EmbeddingReleaseManifest.fileHash(stage.resolve(config)));
+        Files.write(stage.resolve("evidence.json"), EmbeddingReleaseManifest.JSON.writeValueAsBytes(evidence));
+        return stage;
     }
 
     @Test
@@ -345,7 +450,7 @@ class EmbeddingReleaseJobTest {
         publisher.exportTraining(historicalRelease, Instant.parse("2026-01-10T00:00:00Z"), csv);
         var json = metadata(name);
         json.putObject("embeddingCompatibility").put("transformSha256",EmbeddingReleaseManifest.fileHash(transform))
-                .put("embeddingVersion",version).put("featureSchema","pair-v1");
+                .put("embeddingVersion",version).put("featureSchema","pair-v1").put("fitCutoff", HISTORICAL.toString());
         json.putArray("inputs").addObject().put("sha256",EmbeddingReleaseManifest.fileHash(csv));
         json.putObject("split").put("trainLabelThroughInclusive","2026-01-10T00:00:00Z")
                 .put("validationLabelThroughInclusive","2026-01-17T00:00:00Z");

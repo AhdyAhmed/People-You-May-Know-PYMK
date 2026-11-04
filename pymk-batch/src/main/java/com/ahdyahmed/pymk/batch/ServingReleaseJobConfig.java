@@ -22,8 +22,8 @@ public class ServingReleaseJobConfig {
     @Bean
     Job servingReleaseJob(JobRepository repository, Step servingReleaseActionStep) {
         return new JobBuilder("servingReleaseJob", repository).validator(p -> {
-            if (p.getString("releaseId") == null || !java.util.Set.of("export", "export-v2", "activate", "rollback").contains(p.getString("action", ""))) {
-                throw new JobParametersInvalidException("releaseId and action=export|export-v2|activate|rollback are required");
+            if (p.getString("releaseId") == null || !java.util.Set.of("export", "export-v2", "activate", "activate-approved", "rollback").contains(p.getString("action", ""))) {
+                throw new JobParametersInvalidException("releaseId and action=export|export-v2|activate|activate-approved|rollback are required");
             }
             if ("export-v2".equals(p.getString("action"))) {
                 try {
@@ -31,6 +31,13 @@ public class ServingReleaseJobConfig {
                     Instant.parse(p.getString("labelWindowEnd", ""));
                     if (p.getString("outputPath", "").isBlank()) throw new IllegalArgumentException("outputPath is required");
                 } catch (IllegalArgumentException | java.time.DateTimeException ex) { throw new JobParametersInvalidException(ex.getMessage()); }
+            }
+            if ("activate-approved".equals(p.getString("action"))) {
+                for (String field : java.util.List.of("stagePath", "legacyModelPath", "legacyMetadataPath"))
+                    if (p.getString(field, "").isBlank()) throw new JobParametersInvalidException(field + " is required");
+                try {
+                    if (Long.parseLong(p.getString("expectedEpoch", "")) < 0) throw new IllegalArgumentException();
+                } catch (IllegalArgumentException ex) { throw new JobParametersInvalidException("Nonnegative expectedEpoch is required"); }
             }
         }).start(servingReleaseActionStep).build();
     }
@@ -51,6 +58,7 @@ public class ServingReleaseJobConfig {
             @Value("#{jobParameters['legacyMetadataPath']}") String legacyMetadata,
             @Value("#{jobParameters['labelWindowEnd']}") String labelEnd,
             @Value("#{jobParameters['datasetId']}") String datasetId,
+            @Value("#{jobParameters['stagePath']}") String stage,
             @Value("#{jobParameters['outputPath']}") String output) {
         return (contribution, context) -> {
             switch (action) {
@@ -60,6 +68,7 @@ public class ServingReleaseJobConfig {
                         Path.of(legacyModel == null ? "artifacts/models/light-ranker/light-logreg-v1.onnx" : legacyModel),
                         Path.of(legacyMetadata == null ? "artifacts/models/light-ranker/light-logreg-v1.metadata.json" : legacyMetadata));
                 case "rollback" -> service.rollback(id, Long.parseLong(epoch));
+                case "activate-approved" -> service.activateApproved(id, Long.parseLong(epoch), Path.of(stage), Path.of(legacyModel), Path.of(legacyMetadata));
                 default -> throw new IllegalArgumentException("Unknown action");
             }
             return RepeatStatus.FINISHED;

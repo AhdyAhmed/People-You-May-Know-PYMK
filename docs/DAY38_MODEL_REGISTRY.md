@@ -9,7 +9,8 @@ alias, calls a serving activation API or updates the database release pointer.
 
 Schema-1 Day 23–30 release manifests remain usable. Schema-2 manifests add pinned
 registry evidence and can stage embeddings, but **activation is intentionally
-blocked** until the guarded model-sync/approval workflow in Day 39 is implemented.
+blocked through the legacy activation action**. Day 39 now supplies a separate
+[guarded model-sync/approval workflow](DAY39_GUARDED_PROMOTION.md).
 Successful registration is not model quality approval. A failed offline quality
 gate remains failed evidence; it does not become permission to promote.
 
@@ -192,4 +193,5 @@ the future approval workflow or change the active epoch.
 Top-level logs: `artifacts/day38-verify.log`, `artifacts/day38-python.log`,
 `artifacts/day38-registry-smoke.log` and `artifacts/day38-serving-smoke.log`.
 Generated evidence is ignored by Git. These checks verify the tested scenarios,
-not an absence of every possible defect. Guarded promotion remains Day 39 work.
+not an absence of every possible defect. Subsequent guarded promotion is documented
+in the [Day 39 runbook](DAY39_GUARDED_PROMOTION.md).

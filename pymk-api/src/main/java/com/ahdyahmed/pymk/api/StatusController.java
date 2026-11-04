@@ -16,7 +16,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M7 - Day 38: Immutable artifacts and model registry",
+                "milestone", "M7 - Day 39: Guarded promotion and model synchronization",
                 "scorer", pipeline.mode()
         );
     }

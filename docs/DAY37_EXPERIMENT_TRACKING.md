@@ -119,7 +119,8 @@ gate from a generic argument/computation failure.
 
 No ONNX upload, model registration, alias changes, release preparation or automatic
 promotion happens on Day 37. The separate [Day 38 adapter](DAY38_MODEL_REGISTRY.md)
-adds exact registry candidates; guarded promotion remains Days 39–40. A tracked successful run is
+adds exact registry candidates; [Day 39](DAY39_GUARDED_PROMOTION.md) adds guarded
+local-operator promotion, with lifecycle recovery remaining Day 40. A tracked successful run is
 not production approval, and the serving database pointer remains authoritative.
 
 ## Verification
@@ -163,4 +164,5 @@ Top-level local logs are `artifacts/day37-verify.log`,
 `artifacts/day37-serving-smoke.log`. Generated evidence is intentionally ignored
 by Git. These checks do not certify shared remote workers or guarantee absence
 of every possible defect. Subsequent registry acceptance is recorded in the
-[Day 38 runbook](DAY38_MODEL_REGISTRY.md); promotion remains Days 39–40.
+[Day 38 runbook](DAY38_MODEL_REGISTRY.md), and guarded promotion in the
+[Day 39 runbook](DAY39_GUARDED_PROMOTION.md).

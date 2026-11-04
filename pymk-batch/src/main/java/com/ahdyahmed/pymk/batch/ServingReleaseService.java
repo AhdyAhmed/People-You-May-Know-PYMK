@@ -22,16 +22,32 @@ public class ServingReleaseService {
         this.jdbc = jdbc; this.staging = staging; this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void activate(String id, long expectedEpoch, Path modelPath, Path metadataPath,
                          Path legacyModel, Path legacyMetadata) throws Exception {
+        activateInternal(id, expectedEpoch, modelPath, metadataPath, legacyModel, legacyMetadata, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void activateApproved(String id, long expectedEpoch, Path stage, Path legacyModel, Path legacyMetadata) throws Exception {
+        activateInternal(id, expectedEpoch, stage.resolve("light/model.onnx"), stage.resolve("light/metadata.json"), legacyModel, legacyMetadata, stage);
+    }
+
+    private void activateInternal(String id, long expectedEpoch, Path modelPath, Path metadataPath,
+                                  Path legacyModel, Path legacyMetadata, Path approvedStage) throws Exception {
         lock(expectedEpoch);
         staging.lockSources();
         var release = jdbc.queryForMap("SELECT * FROM pymk_serving_releases WHERE release_id = ? FOR UPDATE", id);
         JsonNode releaseManifest = EmbeddingReleaseManifest.JSON.readTree(release.get("manifest").toString());
         RegistryReleaseContract.validate(releaseManifest);
         if (releaseManifest.path("schemaVersion").asInt() == 2) {
-            throw new IllegalArgumentException("Registry-backed activation requires the guarded model-sync and approval workflow; registration is not promotion");
+            if (approvedStage == null) throw new IllegalArgumentException("Registry-backed activation requires approval; registration is not promotion");
+            var approved = PromotionApproval.verify(approvedStage, expectedEpoch, clock.instant());
+            if (!approved.equals(releaseManifest)
+                    || !EmbeddingReleaseManifest.fileHash(approvedStage.resolve("release.json")).equals(release.get("manifest_sha256")))
+                throw new IllegalArgumentException("Approval does not match staged release");
+        } else if (approvedStage != null) {
+            throw new IllegalArgumentException("Approved activation requires a registry release");
         }
         if (!"STAGED".equals(release.get("state")) && !"READY".equals(release.get("state"))) throw new IllegalStateException("Release is not fully staged");
         if (!staging.revision().equals(release.get("source_fingerprint"))) throw new IllegalStateException("Source changed since staging; rebuild before activation");
@@ -39,9 +55,26 @@ public class ServingReleaseService {
         Long newerMembers = jdbc.queryForObject("SELECT count(*) FROM members WHERE created_at > ?", Long.class, Timestamp.from(snapshot));
         Long newerEdges = jdbc.queryForObject("SELECT count(*) FROM connections WHERE connected_at > ?", Long.class, Timestamp.from(snapshot));
         if (newerMembers != 0 || newerEdges != 0) throw new IllegalStateException("Serving snapshot does not cover the live member/graph cohort");
+        if (approvedStage != null && releaseManifest.path("registry").path("models").has("heavy")) {
+            var heavy = EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(approvedStage.resolve("heavy/metadata.json")));
+            for (var input : heavy.path("inputs")) {
+                Long matches = jdbc.queryForObject("""
+                        SELECT count(*) FROM pymk_training_datasets_v2
+                        WHERE csv_sha256 = ? AND dataset_id = ? AND provenance = CAST(? AS jsonb) AND label_window_end <= ?
+                        """, Long.class, input.path("sha256").asText(), input.path("provenance").path("datasetId").asText(),
+                        input.path("provenance").toString(), Timestamp.from(snapshot));
+                if (matches != 1) throw new IllegalArgumentException("Heavy input is not a registered mature dataset with exact provenance");
+            }
+        }
 
         byte[] bytes = Files.readAllBytes(modelPath);
         byte[] metadataBytes = Files.readAllBytes(metadataPath);
+        if (approvedStage != null) {
+            var files = releaseManifest.path("registry").path("models").path("light").path("files");
+            if (!EmbeddingReleaseManifest.sha256(bytes).equals(files.path("model.onnx").asText())
+                    || !EmbeddingReleaseManifest.sha256(metadataBytes).equals(files.path("metadata.json").asText()))
+                throw new IllegalArgumentException("Pinned L1 bytes changed");
+        }
         JsonNode metadata = EmbeddingReleaseManifest.JSON.readTree(metadataBytes);
         String hash = jdbc.queryForObject("SELECT transform_sha256 FROM pymk_embedding_transforms WHERE embedding_version = ?", String.class, release.get("embedding_version"));
         var compatibility = metadata.path("embeddingCompatibility");
@@ -100,6 +133,11 @@ public class ServingReleaseService {
             jdbc.update("UPDATE pymk_serving_releases SET state='READY', model_version=?, model_bytes=?, model_metadata=? WHERE release_id=?",
                     model.modelVersion(), bytes, metadataBytes, id);
             jdbc.update("UPDATE pymk_active_release SET release_id=?, epoch=epoch+1", id);
+            if (approvedStage != null) {
+                byte[] approval = Files.readAllBytes(approvedStage.resolve("approval.json"));
+                jdbc.update("INSERT INTO pymk_promotion_audit(release_id, activated_epoch, approval_sha256, approval) VALUES (?, ?, ?, CAST(? AS jsonb))",
+                        id, expectedEpoch + 1, EmbeddingReleaseManifest.sha256(approval), new String(approval, java.nio.charset.StandardCharsets.UTF_8));
+            }
         }
     }
 

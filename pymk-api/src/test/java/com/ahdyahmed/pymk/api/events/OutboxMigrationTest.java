@@ -31,6 +31,7 @@ class OutboxMigrationTest {
                     CASE WHEN content_fingerprint = 'a' THEN 'PROFILE_VIEW' ELSE 'CONNECTION_CREATED' END,
                     1, 2, now(), now(), 1, '{}', 'test', 0, 0, 0 FROM event_consumer_receipt
                     """);
+            assertThat(Flyway.configure().dataSource(source).target("11").load().migrate().migrationsExecuted).isEqualTo(1);
             var flyway = Flyway.configure().dataSource(source).load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();
@@ -43,6 +44,7 @@ class OutboxMigrationTest {
             assertThat(jdbc.queryForObject("SELECT count(*) FROM live_connection_state", Long.class)).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM member_cache_epoch", Long.class)).isEqualTo(2);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM event_consumer_receipt", Long.class)).isEqualTo(2);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_promotion_audit", Long.class)).isZero();
         }
     }
 }

@@ -7,7 +7,8 @@ metadata and proxied persistent artifact storage. It does **not** automatically
 track existing training commands, register serving models, promote releases or
 change recommendation behavior. Opt-in tracking is now implemented in
 [Day 37](DAY37_EXPERIMENT_TRACKING.md), and exact registry candidates in
-[Day 38](DAY38_MODEL_REGISTRY.md); guarded promotion remains Days 39–40. Java serving
+[Day 38](DAY38_MODEL_REGISTRY.md). [Day 39](DAY39_GUARDED_PROMOTION.md) adds guarded
+local-operator promotion; broader lifecycle recovery remains Day 40. Java serving
 still uses validated ONNX artifacts and the PostgreSQL release pointer; it never
 calls MLflow. The base Compose profile remains PostgreSQL + Redis only.
 
@@ -109,7 +110,7 @@ and [metadata upgrades](https://mlflow.org/docs/latest/self-hosting/migration/).
 5. Do not assume database downgrades are supported. Rollback restores the paired
    metadata/artifact snapshot with its original image. Reconcile any later writes
    before switching; otherwise they are lost. Retain active/rollback model lineage
-   recorded by Day 38 and the future Days 39–40 promotion workflow.
+   recorded by Days 38–39 and the future Day 40 lifecycle workflow.
 
 Day 36 tests fresh-schema migration, repeat upgrade at the **same pinned version**,
 container recreation, and restore into fresh volumes. It does not claim an

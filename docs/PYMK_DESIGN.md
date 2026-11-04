@@ -67,11 +67,12 @@ status differ.
 | MLflow infrastructure and persistent storage | Complete Day 36; `DAY36_MLFLOW_INFRASTRUCTURE.md` |
 | Opt-in MLflow tracking for five ML commands with offline evidence and retry publication | Implemented Day 37; `DAY37_EXPERIMENT_TRACKING.md` |
 | Exact ONNX registry versions and schema-2 pinned release evidence | Implemented Day 38; `DAY38_MODEL_REGISTRY.md` |
-| Guarded model synchronization, promotion and lifecycle recovery | Planned for Days 39–40 (M7); section 7.3 |
+| Guarded model synchronization and local operator-approved promotion | Implemented Day 39; `DAY39_GUARDED_PROMOTION.md` |
+| Registry lifecycle recovery and coordinated restoration | Planned Day 40 (M7); section 7.3 |
 | Airflow scheduling, safe backfills and restartable batch/ML workflows | Planned for Days 41–45 (M8); section 7.4 |
 | Unified operational dashboards and packaged portfolio release | Planned for M9–M10 |
 
-The current checkpoint is **Day 38 complete (M1–M6 complete; M7 in progress)**. Target-only sections below use
+The current checkpoint is **Day 39 complete (M1–M6 complete; M7 in progress)**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
@@ -137,9 +138,9 @@ flowchart LR
         GRAPH["Graph Index Builder - planned"]
     end
 
-    subgraph MLOps["MLOps control plane (registry Day 38, promotion planned)"]
+    subgraph MLOps["MLOps control plane (registry and guarded promotion Day 39)"]
         MLFLOW["MLflow Server - Tracking and Pinned ONNX Registry"]
-        ARTIFACTS["Persistent Artifact Storage - Immutability Gates Planned"]
+        ARTIFACTS["Persistent Artifact Storage - Checksum Gates"]
         AIRFLOW["Airflow Scheduler - M8"]
         PROMOTE["Validated Staging and Approved Rollout"]
     end
@@ -191,7 +192,7 @@ flowchart LR
     INVALIDATE -->|"retry exhausted"| DLT
 ```
 
-Ranking stages run in-process behind Java interfaces at the Day 38 checkpoint;
+Ranking stages run in-process behind Java interfaces at the Day 39 checkpoint;
 L2 and re-ranking are opt-in. Dashed edges denote planned
 orchestration/tracking, not request-time dependencies. Ingestion/outbox publishing
 and independent durable consumers with live feature/cache projections are implemented.
@@ -217,7 +218,7 @@ a separate microservice.
 | Caching | Spring Data Redis | Cache L0 candidate sets and final PYMK lists (TTL) |
 | Batch / ETL | Spring Batch | Implemented restartable jobs; automatic schedules arrive in M8 |
 | Async / messaging (M6) | Apache Kafka 3.9.1 + Spring Kafka | Outbox, consumers, DLT recovery, live windows, cache epochs, restart resilience and Micrometer monitoring through Day 35 |
-| Experiment/model lifecycle (M7) | MLflow 3.17.1 Tracking + Model Registry | Day 36 isolated metadata/artifacts; Day 37 tracking; Day 38 pinned registry; promotion planned Days 39–40 |
+| Experiment/model lifecycle (M7) | MLflow 3.17.1 Tracking + Model Registry | Day 36 isolated metadata/artifacts; Day 37 tracking; Day 38 pinned registry; Day 39 local guarded promotion; lifecycle recovery Day 40 |
 | Workflow orchestration (planned M8) | Apache Airflow | Schedules existing Spring Batch/Python jobs; independent metadata and bounded worker resources |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
 | Vector similarity | pgvector extension on Postgres | Embedding-based retrieval (EBR) candidate source |
@@ -878,7 +879,7 @@ from the historical training snapshot and cannot rewrite its leakage boundary.
 Broker outages leave valid active serving features usable while outbox backlog
 and freshness lag remain observable.
 
-### 7.3 MLflow experiment and model lifecycle (registry Day 38; promotion planned Days 39–40)
+### 7.3 MLflow experiment and model lifecycle (registry Day 38; guarded promotion Day 39)
 
 MLflow follows Kafka in delivery order, but tracks finite offline work rather
 than consuming every event. Day 37 adds searchable experiments to the existing
@@ -962,7 +963,7 @@ Schema-2 release manifests preserve existing release/feature/embedding fields an
 embed exact registry name/version, upload and source tracking run IDs, artifact
 URIs and candidate/file digests. L2's comparison L1 must match the pinned L1.
 Schema-1 manifests remain supported. Schema-2 embedding staging is supported,
-but activation is blocked until Day 39 supplies guarded synchronization/approval.
+but activation requires Day 39's separate guarded synchronization/approval action.
 Registration itself never changes the active release or grants approval. See the
 [Day 38 runbook](DAY38_MODEL_REGISTRY.md) for commands, privacy boundaries and recovery.
 Full metadata/transform/report uploads may contain sensitive lineage; use restricted
@@ -975,20 +976,28 @@ changes the staged candidate nor activates serving. Use aliases/tags instead of
 deprecated registry stages; neither is a distributed deployment transaction.
 See [MLflow registry workflows](https://www.mlflow.org/docs/latest/ml/model-registry/workflow/).
 
-The planned Day 39 model-sync adapter downloads the exact approved artifacts to immutable
-staging, validates the entire bundle and uses the Day 23 release mechanism.
-Require explicit approval bound to manifest digest and expected release epoch,
-with parity, temporal validity, coverage, declared quality and cold/warm latency
-checks. The Day 30 small-cohort demo is not a production-quality approval.
+The Day 39 model-sync adapter downloads exact pinned artifacts to a new immutable
+staging directory, rechecks remote lineage/checksums and reruns production Java
+parity. The local `PromotionApproval` command binds reviewed rehearsal evidence,
+deployment/fallback configuration, manifest and sync digests, expiry and expected
+release epoch. `activate-approved` revalidates under the PostgreSQL lock and uses
+the Day 23 release checks. Flyway V12 records approval atomically with activation.
+Full coverage, declared quality, at least 30 requesters, temporal validity and
+cold/warm latency thresholds are required. L2 requires a pinned passing evaluation;
+RERANK also requires exact pinned blend properties. The operator measures and
+attests rehearsal evidence; this is not a signed approval or remote measurement
+attestation system. The Day 30 small-cohort demo is not production approval.
 PostgreSQL remains the active L1/feature/vector release authority; serving cache
 identity includes the pinned release/configuration, never a mutable registry alias.
 
 L2 and blend configuration currently belong to the process deployment, not the
-Day 23 database pointer. M7 must stage the full compatible bundle and demonstrate
+Day 23 database pointer. Day 39 binds the full compatible bundle and requires
 a controlled rollout/readiness check plus rollback of both database release and
-process settings. Use a documented drained/restart boundary where necessary;
+process settings. Use the documented drained/restart boundary;
 do not promise atomic multi-process hot activation. Successful training, registry
 registration or a future DAG run never grants promotion by itself.
+See the [Day 39 runbook](DAY39_GUARDED_PROMOTION.md) for the explicit local-operator
+trust boundary, evidence contract, activation and L1 fallback commands.
 
 **Failure gate.** Test partial uploads, duplicate retries, checksum/contract
 failures, moved aliases, stale expected epochs, registry/artifact outages and
@@ -1214,7 +1223,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 4. **M4 — L2 heavy ranker**: train offline model, export ONNX, evaluate and serve via `pymk-heavy-ranker` with explicit L1 rollback. **Implementation complete through Day 28; no production model-quality promotion is claimed.**
 5. **M5 — Re-ranker**: blending + exposure diversification, validation-only Bayesian weight tuning, immutable configuration/report artifacts and a seeded-to-packaged-HTTP rollback demo are **complete through Day 30**. No automatic production promotion or causal lift is claimed.
 6. **M6 — Kafka event backbone (complete through Day 35)**: infrastructure/contracts, ingestion/outbox, independent consumers, retries/DLT replay, live windows, cache epochs, finite reconciliation, restart resilience and operational metrics implemented and verified. See the Day 35 runbook for regression and packaged-application evidence.
-7. **M7 — MLflow experiment and model lifecycle (in progress)**: Days 36–38 infrastructure, persistent storage, opt-in experiment tracking, publication recovery, exact registered ONNX versions and pinned release evidence verified. Guarded model synchronization/promotion and lifecycle recovery remain Days 39–40.
+7. **M7 — MLflow experiment and model lifecycle (in progress)**: Days 36–39 infrastructure, persistent storage, opt-in experiment tracking, publication recovery, exact registered ONNX versions, pinned release evidence and guarded local-operator synchronization/promotion verified. Broader lifecycle recovery remains Day 40.
 8. **M8 — Airflow orchestration + batch operations (Days 41–45, planned)**: schedule existing jobs, mature-data dependencies, bounded retries, stable work identities, Kafka reconciliation, safe backfills and controlled release workflows.
 9. **M9 — Observability + offline eval dashboard (planned)**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, MLflow/Airflow operational visibility, and Recall@k tracking over time.
 10. **M10 — Polish for portfolio (planned)**: one-command lightweight/full Kafka/MLflow/Airflow Compose profiles, architecture/runbook documentation, load-test evidence, sample requests, recovery drills and reproducible offline evaluation.

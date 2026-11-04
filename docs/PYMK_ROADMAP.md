@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 38 complete (M1–M6 complete; M7 in progress).
+**Current checkpoint:** Day 39 complete (M1–M6 complete; M7 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Day 36 MLflow infrastructure/recovery, Day 37 opt-in tracking/publication recovery and Day 38 exact registry contracts are verified. Day 39 guarded promotion/model synchronization is next.
+Day 36 MLflow infrastructure/recovery, Day 37 opt-in tracking/publication recovery, Day 38 exact registry contracts and Day 39 guarded local-operator promotion/model synchronization are verified. Day 40 lifecycle recovery is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow infrastructure, opt-in tracking and exact registry candidates are implemented through Day 38; guarded promotion/model synchronization and Airflow remain future work.
+release (M10). MLflow infrastructure, opt-in tracking, exact registry candidates and guarded local-operator promotion/model synchronization are implemented through Day 39; broader lifecycle recovery and Airflow remain future work.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–38 are the implementation record. Unchecked future days below
+Completed Days 1–39 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–38 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–39 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -335,11 +335,14 @@ Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 - Schema-1 remains supported; schema-2 candidates stage with validated compatibility but cannot activate before Day 39's guarded approval/model-sync workflow. Lost version-creation acknowledgments can leave orphan versions; retries never claim exactly-once registration.
 - Verified **2026-10-14**: **267 Java tests**, **94 Python tests** (warnings treated as errors), clean dependency check, real L1/L2 registry upload/retry/alias/corruption checks, and full packaged serving, rollback, blend and Kafka recovery regression. See the [Day 38 runbook](DAY38_MODEL_REGISTRY.md).
 
-**Day 39 — Guarded promotion + model synchronization**
+**Day 39 — Guarded promotion + model synchronization ✅**
 
 - Implement the model-sync adapter that downloads an exact registered version to a staged immutable location and invokes existing validation/release preparation. No request handler calls MLflow.
 - Bind L1, optional L2, transforms/features, candidate budgets and blend configuration into one approved manifest. Require parity, temporal/cohort validity, coverage, declared quality and cold/warm latency gates plus explicit operator approval; successful training is not promotion.
 - Preserve PostgreSQL expected-epoch activation and cache isolation. L2/RERANK configuration is process-level today: verify a controlled rollout and matching rollback rather than claiming an alias flip updates running JVMs. Reject stale approvals or changed digests and prove L1 fallback.
+- Implemented exact-version `pymk-model-sync`, fresh immutable staging, repeated production Java parity, explicit expiring `PromotionApproval`, `activate-approved` and Flyway V12 transactional approval audit. Existing schema-1 activation remains supported; schema-2 requires approval. Heavy label maturity and exact registered v2 input provenance are checked before activation.
+- Approval binds artifact/manifest digests, process budgets/blend settings, L1 fallback, expected epoch and reviewed coverage/quality/cold-warm latency evidence. This is a trusted local-operator workflow: rehearsal measurements and drained/restart rollout are operator responsibilities, not signed remote attestations or automatic fleet deployment. Tiny smoke cohorts cannot satisfy the minimum 30-requester gate.
+- Verified **2026-10-15**: **272 Java tests** (zero failures/errors/skips), **99 Python tests** with warnings treated as errors, clean dependency check, live registry synchronization/alias/corruption checks and packaged approval rejection. Packaged L2/blend/rollback assertions passed before a combined run was interrupted by container stop signals; a separate serving/Kafka recovery run completed successfully. Evidence and limitations: [Day 39 runbook](DAY39_GUARDED_PROMOTION.md).
 
 **Day 40 — MLflow failure recovery + lifecycle runbook**
 

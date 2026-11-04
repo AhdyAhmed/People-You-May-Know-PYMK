@@ -1,11 +1,13 @@
 """Real server + packaged production Java acceptance, scoped to a disposable server."""
 import argparse
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import subprocess
 from unittest.mock import patch
 
 import test_heavy_ranker_training as fixture_module
 from test_registry import train_tracked
-from pymk_training import registry, tracking, evaluate_heavy_ranker, tune_blend, profile_embeddings, release_manifest
+from pymk_training import registry, tracking, evaluate_heavy_ranker, tune_blend, profile_embeddings, release_manifest, model_sync
 from pymk_training.blend_context_fixture import create
 
 
@@ -78,12 +80,38 @@ def main():
         assert registry.read(root / "release-v2.json")["registry"]["models"]["light"]["version"] == registration["version"]
         assert release.read_bytes() == before
         print("PASS: schema-2 extension preserved legacy compatibility; alias movement did not change pinned candidates or legacy release")
+        synced = root / "synchronized"
+        model_sync.sync(root / "release-v2.json", synced, args.uri, args.jar, client)
+        assert (synced / "light/model.onnx").read_bytes() == (stages[0] / "model.onnx").read_bytes()
+        assert (synced / "heavy/model.onnx").read_bytes() == (stages[1] / "model.onnx").read_bytes()
+        assert registry.read(synced / "release.json")["registry"] == extended["registry"]
+        assert not (synced / "approval.json").exists()
+        print("PASS: Day 39 exact-version synchronization reran production Java parity and preserved pins after alias movement; no implicit approval")
+        # The tiny demo cohort is deliberately NOT production approval evidence.
+        now = datetime.now(timezone.utc)
+        evidence = {"schemaVersion": 1, "manifestSha256": tracking.digest(synced / "release.json"),
+            "measuredAt": now.isoformat(), "environment": "disposable tiny-cohort rejection probe",
+            "cohortSha256": tracking.digest(root / "evaluation.json"), "mode": "L1",
+            "coverage": {"observed": 1, "minimum": 1},
+            "quality": {"observed": .5, "minimum": .5},
+            "requesters": {"observed": 4, "minimum": 30}}
+        registry.immutable_json(synced / "tiny-cohort-evidence.json", evidence)
+        rejected = subprocess.run(["java", "-Dloader.main=com.ahdyahmed.pymk.batch.PromotionApproval", "-cp", str(args.jar),
+            "org.springframework.boot.loader.launch.PropertiesLauncher", str(synced), str(synced / "tiny-cohort-evidence.json"),
+            "smoke-operator", "0", (now + timedelta(hours=1)).isoformat()], capture_output=True, text=True, timeout=120)
+        assert rejected.returncode != 0 and "Failed requesters gate" in rejected.stderr, rejected.stderr
+        assert not (synced / "approval.json").exists()
+        print("PASS: Day 39 packaged approval command rejected tiny-cohort evidence without creating approval")
         # Real server tampering after registration must be detected by read-back.
         corrupt = root / "corrupt"; corrupt.mkdir(); (corrupt / "model.onnx").write_bytes(b"corrupt")
         client.log_artifact(registration["runId"], str(corrupt / "model.onnx"), "candidate/" + registration["candidateSha256"])
         try: registry.publish(stages[0], args.uri, client)
         except ValueError: pass
         else: raise AssertionError("remote corruption accepted")
+        try: model_sync.sync(root / "release-v2.json", root / "rejected-sync", args.uri, args.jar, client)
+        except ValueError: pass
+        else: raise AssertionError("corrupted artifact synchronized")
+        assert not (root / "rejected-sync/sync.json").exists()
         print("PASS: changed registered artifact rejected; no promotion API was invoked")
     finally:
         fixture.doCleanups()

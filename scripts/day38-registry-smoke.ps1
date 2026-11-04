@@ -25,7 +25,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'MLflow startup failed' }
     & $Python "$root/pymk-ml-training/tests/day38_registry_probe.py" --root $output --uri "http://127.0.0.1:$port" --jar "$root/pymk-batch/target/pymk-batch.jar" *> "$output/probe.log"
     if ($LASTEXITCODE -ne 0) { throw "Day 38 registry probe failed; see $output/probe.log" }
-    Write-Host "PASS: Day 38 real model registry, production Java parity, immutable lineage, interrupted upload, alias isolation and corruption rejection. Evidence: $output"
+    Write-Host "PASS: Days 38-39 real registry and model synchronization, production Java parity, immutable lineage, interrupted upload, alias isolation and corruption rejection. Evidence: $output"
 } finally {
     if ($project -notmatch '^pymk-day38-[a-f0-9]{10}$') { throw 'Unsafe cleanup target' }
     & docker @compose logs --no-color *> "$output/services.log"

@@ -27,6 +27,7 @@ pymk-evaluate-heavy-ranker = "pymk_training.evaluate_heavy_ranker:main"
 pymk-tune-blend = "pymk_training.tune_blend:main"
 pymk-publish-tracking = "pymk_training.tracking:main"
 pymk-model-registry = "pymk_training.registry:main"
+pymk-model-sync = "pymk_training.model_sync:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

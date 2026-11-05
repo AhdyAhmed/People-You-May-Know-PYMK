@@ -141,15 +141,40 @@ public class ServingReleaseService {
         }
     }
 
-    @Transactional
-    public void rollback(String id, long expectedEpoch) {
+    @Transactional(rollbackFor = Exception.class)
+    public void rollback(String id, long expectedEpoch) throws Exception {
         lock(expectedEpoch);
         if ("legacy".equals(id)) {
             if (jdbc.queryForObject("SELECT count(*) FROM pymk_legacy_release_model", Long.class) != 1) throw new IllegalStateException("Legacy rollback model was not captured");
+            validateRollbackModel(jdbc.queryForMap("SELECT * FROM pymk_legacy_release_model FOR SHARE"));
             jdbc.update("UPDATE pymk_active_release SET release_id=NULL, epoch=epoch+1");
         } else {
             if (jdbc.queryForObject("SELECT count(*) FROM pymk_serving_releases WHERE release_id=? AND state='READY'", Long.class, id) != 1) throw new IllegalStateException("Rollback requires a previously validated READY release");
+            validateRollbackModel(jdbc.queryForMap("SELECT * FROM pymk_serving_releases WHERE release_id=? FOR SHARE", id));
             jdbc.update("UPDATE pymk_active_release SET release_id=?, epoch=epoch+1", id);
+        }
+    }
+
+    /** A historical READY flag cannot prove that retained bytes are still usable. No registry access. */
+    private void validateRollbackModel(java.util.Map<String, Object> row) throws Exception {
+        byte[] bytes = (byte[]) row.get("model_bytes");
+        byte[] metadataBytes = (byte[]) row.get("model_metadata");
+        if (bytes == null || bytes.length == 0 || metadataBytes == null || metadataBytes.length == 0)
+            throw new IllegalStateException("Rollback model artifacts are missing");
+        JsonNode metadata = EmbeddingReleaseManifest.JSON.readTree(metadataBytes);
+        if (row.get("manifest") != null) {
+            var manifest = EmbeddingReleaseManifest.JSON.readTree(row.get("manifest").toString());
+            if (manifest.path("schemaVersion").asInt() == 2) {
+                var pins = manifest.at("/registry/models/light/files");
+                if (!EmbeddingReleaseManifest.sha256(bytes).equals(pins.path("model.onnx").asText())
+                        || !EmbeddingReleaseManifest.sha256(metadataBytes).equals(pins.path("metadata.json").asText()))
+                    throw new IllegalStateException("Rollback artifacts differ from registry pins");
+            }
+        }
+        try (var model = OnnxLightRankerModel.load(bytes, metadata)) {
+            if (!model.modelVersion().equals(row.get("model_version")))
+                throw new IllegalStateException("Rollback model version mismatch");
+            model.score(new float[][]{new float[6]});
         }
     }
 

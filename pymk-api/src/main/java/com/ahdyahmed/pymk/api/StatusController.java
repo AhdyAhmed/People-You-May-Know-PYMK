@@ -16,7 +16,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M7 - Day 39: Guarded promotion and model synchronization",
+                "milestone", "M7 - Day 40: MLflow lifecycle recovery",
                 "scorer", pipeline.mode()
         );
     }

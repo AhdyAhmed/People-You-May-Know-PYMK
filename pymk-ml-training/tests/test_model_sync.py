@@ -59,3 +59,30 @@ class ModelSyncTest(unittest.TestCase):
         for value in self.fixture.client.versions.values():
             self.fixture.client.runs[value.run_id]["status"] = "FAILED"
         with self.assertRaisesRegex(ValueError, "Unacknowledged"): self.sync()
+
+    def test_tracking_outage_leaves_current_stage_unchanged_and_retry_recovers(self):
+        f = self.fixture
+        before = (f.stage / "registered.json").read_bytes()
+        with patch.object(f.client, "get_model_version", side_effect=ConnectionError("tracking unavailable")):
+            with self.assertRaises(ConnectionError): self.sync()
+        self.assertFalse((self.output / "sync.json").exists())
+        self.assertEqual((f.stage / "registered.json").read_bytes(), before)
+        self.output = f.root / "recovered"
+        self.sync()
+        self.assertTrue((self.output / "sync.json").is_file())
+
+    def test_artifact_outage_cannot_publish_partial_completion(self):
+        with patch.object(self.fixture.client, "download_artifacts", side_effect=ConnectionError("artifact store unavailable")):
+            with self.assertRaises(ConnectionError): self.sync()
+        self.assertFalse((self.output / "sync.json").exists())
+
+    def test_manifest_change_during_download_is_rejected(self):
+        f = self.fixture
+        original = f.client.download_artifacts
+        def changed(*args):
+            result = original(*args)
+            self.release.write_bytes(self.release.read_bytes() + b" ")
+            return result
+        with patch.object(f.client, "download_artifacts", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "Source manifest changed"): self.sync()
+        self.assertFalse((self.output / "sync.json").exists())

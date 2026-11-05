@@ -1,5 +1,7 @@
 """Download pinned registry artifacts for offline approval; never activate serving."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -11,7 +13,9 @@ from . import registry as r, tracking
 def sync(release, output, uri, java_jar, client=None):
     tracking.validate_uri(uri)
     release = Path(release).resolve()
-    document = r.read(release)
+    source_bytes = release.read_bytes()
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
+    document = json.loads(source_bytes)
     r.require(document.get("schemaVersion") == 2, "Pinned schema-2 release required")
     models = document["registry"]["models"]
     r.require("light" in models and set(models) <= {"light", "heavy"}, "Invalid model roles")
@@ -60,7 +64,8 @@ def sync(release, output, uri, java_jar, client=None):
     r.immutable_json(output / "release.json", document)
     inventory["release.json"] = tracking.digest(output / "release.json")
     r.require(tracking.digest(java_jar) == verifier_hash, "Java verifier changed during synchronization")
-    record = {"schemaVersion": 1, "sourceManifestSha256": tracking.digest(release), "files": inventory,
+    r.require(tracking.digest(release) == source_hash, "Source manifest changed during synchronization")
+    record = {"schemaVersion": 1, "sourceManifestSha256": source_hash, "files": inventory,
               "javaVerifierSha256": verifier_hash, "automaticPromotion": False}
     r.immutable_json(output / "sync.json", record)
     return record

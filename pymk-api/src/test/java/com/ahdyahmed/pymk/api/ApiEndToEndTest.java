@@ -48,7 +48,7 @@ class ApiEndToEndTest {
                 .andExpect(jsonPath("$.service").value("pymk-api"))
                 .andExpect(jsonPath("$.status").value("up"))
                 .andExpect(jsonPath("$.milestone")
-                        .value("M7 - Day 39: Guarded promotion and model synchronization"))
+                        .value("M7 - Day 40: MLflow lifecycle recovery"))
                 .andExpect(jsonPath("$.scorer").value("L1"));
 
         mvc.perform(get("/api/v1/members/{id}", MEMBER_ID))

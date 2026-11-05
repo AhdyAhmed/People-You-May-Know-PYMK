@@ -201,6 +201,81 @@ class EmbeddingReleaseJobTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_promotion_audit", Long.class)).isZero();
     }
 
+    @Test
+    void concurrentApprovedPromotionsHaveOneWinnerAndOneAudit() throws Exception {
+        Path stage = promotionStage();
+        var now = clock.instant();
+        PromotionApproval.approve(stage, stage.resolve("evidence.json"), "test-operator", 0, now.plusSeconds(3600), now);
+        assertThat(run(stage.resolve("release.json"), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        var start = new CountDownLatch(1);
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            var attempts = java.util.stream.IntStream.range(0, 2).mapToObj(i -> workers.submit(() -> {
+                start.await();
+                try { publisher.activateApproved("approved", 0, stage, model, baselineMetadata); return true; }
+                catch (IllegalStateException ex) { assertThat(ex).hasMessageContaining("Stale expectedEpoch"); return false; }
+            })).toList();
+            start.countDown();
+            int successes = 0;
+            for (var attempt : attempts) if (attempt.get(30, TimeUnit.SECONDS)) successes++;
+            assertThat(successes).isEqualTo(1);
+        }
+        assertThat(store.current().epoch()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pymk_promotion_audit", Long.class)).isEqualTo(1);
+        // Cold startup and rollback use retained DB bytes, not MLflow or the local stage.
+        Files.delete(stage.resolve("light/model.onnx"));
+        var properties = new LightRankerProperties();
+        properties.setModelPath(directory.resolve("absent.onnx"));
+        properties.setMetadataPath(directory.resolve("absent.json"));
+        try (var runtime = new ReleaseLightRankerModel(store, jdbc, EmbeddingReleaseManifest.JSON, properties)) {
+            assertThat(runtime.score(new float[][]{new float[6]})[0]).isBetween(0f, 1f);
+            publisher.rollback("legacy", 1);
+            assertThat(runtime.modelVersion()).isEqualTo("baseline-v1");
+            publisher.rollback("approved", 2);
+            assertThat(runtime.modelVersion()).isEqualTo("example-v1");
+        }
+    }
+
+    @Test
+    void missingOrCorruptRollbackArtifactsNeverChangeCurrentServing() throws Exception {
+        assertThat(run(manifest("history", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(run(manifest("live", LIVE, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        publisher.activate("live", 0, model, releaseMetadata("live-model", "history"), model, baselineMetadata);
+        var properties = new LightRankerProperties();
+        try (var runtime = new ReleaseLightRankerModel(store, jdbc, EmbeddingReleaseManifest.JSON, properties)) {
+            jdbc.update("DELETE FROM pymk_legacy_release_model");
+            assertThatThrownBy(() -> publisher.rollback("legacy", 1)).hasMessageContaining("not captured");
+            jdbc.update("INSERT INTO pymk_legacy_release_model VALUES(true, ?, ?, ?)", "baseline-v1", new byte[0], Files.readAllBytes(baselineMetadata));
+            assertThatThrownBy(() -> publisher.rollback("legacy", 1)).hasMessageContaining("missing");
+            jdbc.update("UPDATE pymk_legacy_release_model SET model_bytes=?", new byte[]{1,2,3});
+            assertThatThrownBy(() -> publisher.rollback("legacy", 1)).isInstanceOf(RuntimeException.class);
+            assertThatThrownBy(() -> publisher.rollback("unretained", 1)).hasMessageContaining("READY");
+            assertThat(store.current().id()).isEqualTo("live");
+            assertThat(store.current().epoch()).isEqualTo(1);
+            assertThat(runtime.score(new float[][]{new float[6]})[0]).isBetween(0f, 1f);
+        }
+        jdbc.update("UPDATE pymk_legacy_release_model SET model_bytes=?", Files.readAllBytes(model));
+        publisher.rollback("legacy", 1);
+        jdbc.update("UPDATE pymk_serving_releases SET model_bytes=? WHERE release_id='live'", new byte[0]);
+        assertThatThrownBy(() -> publisher.rollback("live", 2)).hasMessageContaining("missing");
+        assertThat(store.current().managed()).isFalse();
+        assertThat(store.current().epoch()).isEqualTo(2);
+    }
+
+    @Test
+    void rollbackRechecksRegistryMetadataPins() throws Exception {
+        Path stage = promotionStage();
+        var now = clock.instant();
+        PromotionApproval.approve(stage, stage.resolve("evidence.json"), "test-operator", 0, now.plusSeconds(3600), now);
+        assertThat(run(stage.resolve("release.json"), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        publisher.activateApproved("approved", 0, stage, model, baselineMetadata);
+        publisher.rollback("legacy", 1);
+        var metadata = (com.fasterxml.jackson.databind.node.ObjectNode) EmbeddingReleaseManifest.JSON.readTree(Files.readAllBytes(stage.resolve("light/metadata.json")));
+        metadata.put("unexpected", "changed after publication");
+        jdbc.update("UPDATE pymk_serving_releases SET model_metadata=? WHERE release_id='approved'", EmbeddingReleaseManifest.JSON.writeValueAsBytes(metadata));
+        assertThatThrownBy(() -> publisher.rollback("approved", 2)).hasMessageContaining("registry pins");
+        assertThat(store.current().epoch()).isEqualTo(2);
+    }
+
     private Path promotionStage() throws Exception {
         assertThat(run(manifest("approval-history", HISTORICAL, 4), 1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
         Path meta = releaseMetadata("example-v1", "approval-history");

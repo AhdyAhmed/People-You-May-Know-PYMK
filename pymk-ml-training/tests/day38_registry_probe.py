@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import subprocess
+import shutil
 from unittest.mock import patch
 
 import test_heavy_ranker_training as fixture_module
@@ -11,15 +12,20 @@ from pymk_training import registry, tracking, evaluate_heavy_ranker, tune_blend,
 from pymk_training.blend_context_fixture import create
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--uri", required=True)
     parser.add_argument("--jar", required=True, type=Path)
-    args = parser.parse_args()
+    parser.add_argument("--retain-registry", action="store_true", help="Leave valid bytes for the Day 40 recovery rehearsal")
+    args = parser.parse_args(argv)
     root = args.root.resolve(); client = tracking.sdk_client(args.uri)
     fixture = fixture_module.HeavyRankerTrainingTest(); fixture.setUp()
     try:
+        if args.retain_registry:
+            frozen = root / "frozen-inputs"; frozen.mkdir()
+            for path in [fixture.transform, *fixture.root.glob("*.csv"), *fixture.root.glob("*.csv.provenance.json")]:
+                shutil.copyfile(path, frozen / path.name)
         light = train_tracked(fixture, client, args.uri)
         heavy = train_tracked(fixture, client, args.uri, heavy=True)
         common = sum((["--input", str(path)] for path in fixture.paths), []) + [
@@ -102,6 +108,8 @@ def main():
         assert rejected.returncode != 0 and "Failed requesters gate" in rejected.stderr, rejected.stderr
         assert not (synced / "approval.json").exists()
         print("PASS: Day 39 packaged approval command rejected tiny-cohort evidence without creating approval")
+        if args.retain_registry:
+            return
         # Real server tampering after registration must be detected by read-back.
         corrupt = root / "corrupt"; corrupt.mkdir(); (corrupt / "model.onnx").write_bytes(b"corrupt")
         client.log_artifact(registration["runId"], str(corrupt / "model.onnx"), "candidate/" + registration["candidateSha256"])

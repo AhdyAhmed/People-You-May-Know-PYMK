@@ -6,11 +6,11 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 40 complete (M1–M7 complete).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 41 complete (M1–M7 complete; M8 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > Kafka ingestion/outbox, independently deduplicated journal consumers, bounded retries and acknowledged dead-letter recovery are implemented.
 > Live feature windows, durable cache invalidation, finite reconciliation and Kafka monitoring are implemented and verified. Optional MLflow infrastructure and opt-in tracking for all five ML workflows are verified.
-> Exact MLflow registry versions, guarded local-operator promotion and coordinated lifecycle recovery are implemented. Airflow (M8, Days 41–45), unified dashboards and packaging (M9–M10) remain planned.
+> MLflow lifecycle recovery and the Airflow infrastructure/runtime-contract foundation are implemented. Scheduled feature/model workflows (Days 42–45), unified dashboards and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 40 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 41 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -292,6 +292,16 @@ rejection. Retention is deliberately retain-all, without automated pruning.
 See the [Day 40 recovery runbook](docs/DAY40_LIFECYCLE_RECOVERY.md) for the frozen-data
 demo, backup/restore, retention and serving rollback instructions.
 
+### Day 41 optional Airflow foundation
+
+The `airflow` Compose profile supplies a private, authenticated local Airflow
+3.2.2 stack with dedicated metadata storage, persistent logs/artifacts and bounded
+LocalExecutor workers. The worker image includes Java 21, the batch JAR and an
+isolated trainer virtualenv. `pymk_runtime_contract` validates explicit UTC work
+parameters and runs real Python/Java ONNX parity; it does not activate releases
+or schedule production training. See the [Day 41 setup/runbook](docs/DAY41_AIRFLOW_FOUNDATION.md)
+and `./scripts/day41-airflow-smoke.ps1`. Feature/model scheduling begins Day 42.
+
 ## Data model & how to seed the DB
 
 Flyway migrations are the database schema source of truth; Hibernate validates
@@ -374,7 +384,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M7 - Day 40: MLflow lifecycle recovery","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M8 - Day 41: Airflow infrastructure and workflow contracts","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -770,7 +780,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 38 — Immutable artifacts and model registry**: exact L1/L2 registry versions, production Java parity, checksum-verified uploads and schema-2 pinned release evidence. Verified 2026-10-14: 267 Java tests, 94 Python tests, live registry recovery/corruption checks and full packaged serving/Kafka regression passed. See the [Day 38 runbook](docs/DAY38_MODEL_REGISTRY.md).
 - [x] **Day 39 — Guarded promotion and model synchronization**: exact downloads, production parity, explicit expiring approval, V12 transactional audit, temporal/provenance gates and L1 fallback. Verified 2026-10-15: 272 Java tests, 99 Python tests, live registry/sync checks, packaged L2/blend/rollback checks and a completed serving/Kafka recovery run. See the [Day 39 runbook](docs/DAY39_GUARDED_PROMOTION.md), including the interrupted combined-run evidence.
 - [x] **Day 40 — MLflow lifecycle recovery**: real registry/artifact outages, coordinated backup/restore and exact candidate reproduction, concurrent promotion fencing, rollback artifact revalidation and retain-all lifecycle runbook. Verified 2026-10-15: 275 Java tests, 106 Python tests, live restore/replay and packaged HTTP/rollback/Kafka recovery. See [acceptance evidence](docs/DAY40_LIFECYCLE_RECOVERY.md#acceptance-record).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 41 is next.
+- [x] **Day 41 — Airflow infrastructure and workflow contracts**: isolated authenticated Compose profile, bounded local workers with packaged Java/Python, pure DAG parsing, explicit UTC parameters, real scheduler execution and persistence checks. See [acceptance evidence](docs/DAY41_AIRFLOW_FOUNDATION.md#acceptance-measurements).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 42 is next.
 
 ## License
 

@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 40 complete (M1–M7 complete).
+**Current checkpoint:** Day 41 complete (M1–M7 complete; M8 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Days 36–40 deliver MLflow infrastructure, opt-in tracking, exact registry contracts, guarded local-operator promotion/model synchronization and coordinated lifecycle recovery. Day 41 Airflow infrastructure is next.
+Days 36–40 deliver the MLflow lifecycle. Day 41 adds isolated Airflow infrastructure and a tested Java/Python runtime-contract DAG. Day 42 scheduled feature/model workflows are next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow lifecycle implementation is complete through Day 40; Airflow remains future work.
+release (M10). MLflow lifecycle and the Airflow foundation are implemented; scheduled feature/model workflows, backfills and orchestration resilience remain Days 42–45.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–40 are the implementation record. Unchecked future days below
+Completed Days 1–41 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–40 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–41 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -356,18 +356,22 @@ Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 
 ---
 
-## Week 8 — Airflow Orchestration & Batch Operations (M8, planned)
+## Week 8 — Airflow Orchestration & Batch Operations (M8, in progress)
 
 Airflow schedules bounded workflows after Kafka and MLflow are established.
 Spring Batch still owns chunk transactions/checkpoints and the Python CLIs still
 own training/evaluation. No DAG consumes an unbounded Kafka stream or participates
 in a recommendation request. See design section 7.4.
 
-**Day 41 — Airflow infrastructure + workflow contracts**
+**Day 41 — Airflow infrastructure + workflow contracts ✅**
 
 - Add an optional Linux-container Compose profile with pinned Airflow/provider versions, a bounded local executor, dedicated metadata database/role, persistent logs and health checks. Document Windows Docker Desktop/WSL2 setup and measured resource needs; keep Airflow dependencies isolated from the trainer environment.
 - Define thin DAGs in `orchestration/airflow/`, with UTC data intervals, explicit parameters, `catchup=False`, timeouts, retry budgets and resource pools. Choose and document the worker launch mechanism; ship the tested Java/Python runtime and artifact mounts, not an assumed host installation.
 - Keep Airflow metadata migrations under Airflow's tooling, not app Flyway. Test DAG imports/structure without live services or expensive work during parsing; keep service credentials outside DAG source.
+- Implemented optional Airflow 3.2.2 / standard-provider 1.13.1 profile: dedicated restricted metadata role, authenticated loopback API, scheduler/DAG processor, bounded LocalExecutor and pool, persistent logs/artifacts and independent health checks. Java 21 and an isolated CPU trainer environment ship in the worker image; no host runtimes or Docker socket are assumed.
+- Implemented the manual `pymk_runtime_contract` foundation DAG with validated UTC intervals, source checksum/output identity, explicit timeouts/retries and reference-only XCom. It runs actual Python/Java ONNX inference, reuses identical evidence and rejects invalid intervals before inference. This is not a placeholder claim that Day 42's production training pipeline exists.
+- Automated offline import/contract/startup tests and real authenticated scheduler/recreation smoke are in CI. Setup, resource measurements and final verification: [Day 41 runbook](DAY41_AIRFLOW_FOUNDATION.md). Airflow tooling owns metadata migrations; application Flyway remains unchanged.
+- Acceptance: 275 Java tests, 106 Python tests and 7 offline Airflow tests passed, plus the live authenticated runtime/replay/recreation smoke (2026-10-15; evidence reviewed 2026-10-16). Day 42 production feature/model workflows remain next.
 
 **Day 42 — Scheduled feature and ML workflows**
 

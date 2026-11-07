@@ -21,6 +21,7 @@ COPY --chown=airflow:0 pymk-batch/src/test/resources/day23/model.base64 /opt/pym
 COPY --chown=airflow:0 orchestration/airflow/runtime /opt/pymk/
 COPY --chown=airflow:0 orchestration/airflow/dags /opt/airflow/dags
 COPY --chown=airflow:0 orchestration/airflow/tests /opt/pymk/tests
+COPY --chown=airflow:0 pymk-ml-training/evaluation-policy.json pymk-ml-training/blend-policy.json pymk-ml-training/tests/fixtures/profiles.csv /opt/pymk/fixtures/
 ENV PYTHONPATH=/opt/airflow/dags
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "python", "/opt/pymk/launch.py"]
 CMD ["api-server"]

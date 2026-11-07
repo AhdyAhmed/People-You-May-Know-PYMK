@@ -6,6 +6,13 @@ pymk-ml-training/**
 !pymk-ml-training/pyproject.toml
 !pymk-ml-training/src/
 !pymk-ml-training/src/**
+!pymk-ml-training/evaluation-policy.json
+!pymk-ml-training/blend-policy.json
+!pymk-ml-training/tests/
+pymk-ml-training/tests/**
+!pymk-ml-training/tests/fixtures/
+pymk-ml-training/tests/fixtures/**
+!pymk-ml-training/tests/fixtures/profiles.csv
 !pymk-batch/
 pymk-batch/**
 !pymk-batch/target/

@@ -30,13 +30,32 @@ class WorkflowContractTest(unittest.TestCase):
 
 
 class DagStructureTest(unittest.TestCase):
+    def test_manual_trigger_can_omit_airflow_interval_fields(self):
+        import inspect
+        from pymk_workflows import launch_step
+        signature = inspect.signature(launch_step)
+        self.assertIsNone(signature.parameters["data_interval_start"].default)
+        self.assertIsNone(signature.parameters["data_interval_end"].default)
+
     def test_import_without_live_services_or_subprocesses(self):
         from airflow.dag_processing.dagbag import DagBag
         with patch("subprocess.run", side_effect=AssertionError("DAG parsing launched work")), \
              patch("socket.socket.connect", side_effect=AssertionError("DAG parsing contacted a service")):
             bag = DagBag(dag_folder="/opt/airflow/dags", include_examples=False)
         self.assertEqual(bag.import_errors, {})
-        self.assertEqual(set(bag.dags), {"pymk_runtime_contract"})
+        self.assertEqual(set(bag.dags), {"pymk_runtime_contract", "pymk_feature_refresh", "pymk_model_candidate"})
+        for name, steps in (("pymk_feature_refresh", ["validate", "embeddings", "stage"]),
+                            ("pymk_model_candidate", ["validate", "export", "light", "heavy", "evaluate", "blend", "prepare"])):
+            workflow = bag.dags[name]
+            self.assertFalse(workflow.catchup)
+            self.assertEqual(workflow.max_active_runs, 1)
+            self.assertEqual(str(workflow.timezone), "UTC")
+            self.assertEqual(workflow.task_ids, steps)
+            self.assertEqual(type(workflow.timetable).__name__, "CronDataIntervalTimetable")
+            for index, task in enumerate(workflow.tasks):
+                self.assertEqual(task.pool, "pymk_jobs")
+                self.assertEqual(task.retries, 0)
+                self.assertEqual(task.downstream_task_ids, set(steps[index+1:index+2]))
         dag = bag.dags["pymk_runtime_contract"]
         self.assertFalse(dag.catchup)
         self.assertEqual(dag.max_active_runs, 1)

@@ -1,0 +1,14 @@
+# Disposable acceptance database; never points at the normal application database.
+services:
+  workflow-postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: pymk
+      POSTGRES_USER: pymk
+      POSTGRES_PASSWORD: ${PYMK_WORKFLOW_DB_PASSWORD:?Smoke password required}
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pymk -d pymk"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    mem_limit: 1g

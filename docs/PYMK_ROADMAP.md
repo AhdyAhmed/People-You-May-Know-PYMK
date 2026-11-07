@@ -4,11 +4,11 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 41 complete (M1–M7 complete; M8 in progress).
+**Current checkpoint:** Day 42 complete (M1–M7 complete; M8 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Days 36–40 deliver the MLflow lifecycle. Day 41 adds isolated Airflow infrastructure and a tested Java/Python runtime-contract DAG. Day 42 scheduled feature/model workflows are next.
+Days 36–40 deliver the MLflow lifecycle. Days 41–42 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules and mature tracked model-candidate workflows. Day 43 reconciliation and reproducible backfills are next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
@@ -369,15 +369,17 @@ in a recommendation request. See design section 7.4.
 - Define thin DAGs in `orchestration/airflow/`, with UTC data intervals, explicit parameters, `catchup=False`, timeouts, retry budgets and resource pools. Choose and document the worker launch mechanism; ship the tested Java/Python runtime and artifact mounts, not an assumed host installation.
 - Keep Airflow metadata migrations under Airflow's tooling, not app Flyway. Test DAG imports/structure without live services or expensive work during parsing; keep service credentials outside DAG source.
 - Implemented optional Airflow 3.2.2 / standard-provider 1.13.1 profile: dedicated restricted metadata role, authenticated loopback API, scheduler/DAG processor, bounded LocalExecutor and pool, persistent logs/artifacts and independent health checks. Java 21 and an isolated CPU trainer environment ship in the worker image; no host runtimes or Docker socket are assumed.
-- Implemented the manual `pymk_runtime_contract` foundation DAG with validated UTC intervals, source checksum/output identity, explicit timeouts/retries and reference-only XCom. It runs actual Python/Java ONNX inference, reuses identical evidence and rejects invalid intervals before inference. This is not a placeholder claim that Day 42's production training pipeline exists.
+- Implemented the manual `pymk_runtime_contract` foundation DAG with validated UTC intervals, source checksum/output identity, explicit timeouts/retries and reference-only XCom. It runs actual Python/Java ONNX inference, reuses identical evidence and rejects invalid intervals before inference. This foundation DAG is distinct from the Day 42 feature/model workflows.
 - Automated offline import/contract/startup tests and real authenticated scheduler/recreation smoke are in CI. Setup, resource measurements and final verification: [Day 41 runbook](DAY41_AIRFLOW_FOUNDATION.md). Airflow tooling owns metadata migrations; application Flyway remains unchanged.
-- Acceptance: 275 Java tests, 106 Python tests and 7 offline Airflow tests passed, plus the live authenticated runtime/replay/recreation smoke (2026-10-15; evidence reviewed 2026-10-16). Day 42 production feature/model workflows remain next.
+- Acceptance: 275 Java tests, 106 Python tests and 7 offline Airflow tests passed, plus the live authenticated runtime/replay/recreation smoke (2026-10-15; evidence reviewed 2026-10-16).
 
-**Day 42 — Scheduled feature and ML workflows**
+**Day 42 — Scheduled feature and ML workflows ✅**
 
 - Orchestrate source validation → immutable embedding/feature staging → mature export → tracked L1/L2 training → frozen evaluation → validation-only blend tuning → candidate preparation. Use separate cadence/dependency paths; today's fresh snapshot must not be trained on before its label window matures.
 - Invoke existing Spring Batch jobs and Python CLIs through a tested adapter that waits for real completion, checks exit/execution status and validates outputs. Pass artifact references/checksums through XCom, never datasets or ONNX bytes.
 - Extend Day 23 managed-generation refreshes; never schedule the legacy in-place Day 17 writer against active managed features. Prove compatible model/feature coverage, failed refresh isolation and retained prior generations.
+- Implemented daily `pymk_feature_refresh` and independent weekly `pymk_model_candidate`, explicit UTC interval timetables, reviewed checksum-bound source manifests, completion-aware Java receipts and isolated Python CLI workers. Training, frozen exported-cohort evaluation and validation-only blend tuning require acknowledged MLflow publication; both models receive production Java validation before candidate preparation. No activation is scheduled.
+- Verified 2026-10-16: 278 Java tests (zero failures/errors/skips), 106 Python tests, 17 Airflow tests, complete live candidate preparation, immature-label rejection and failed-refresh isolation with retained prior generations. Zero automatic workflow retries until Day 44 supplies durable recovery mapping. Setup, evidence and interrupted-run accounting: [Day 42 runbook](DAY42_SCHEDULED_WORKFLOWS.md).
 
 **Day 43 — Kafka reconciliation + reproducible backfills**
 

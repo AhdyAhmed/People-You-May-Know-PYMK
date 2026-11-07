@@ -70,10 +70,11 @@ status differ.
 | Guarded model synchronization and local operator-approved promotion | Implemented Day 39; `DAY39_GUARDED_PROMOTION.md` |
 | Registry lifecycle recovery and coordinated restoration | Implemented Day 40; `DAY40_LIFECYCLE_RECOVERY.md` |
 | Airflow infrastructure and runtime/workflow contracts | Implemented Day 41; `DAY41_AIRFLOW_FOUNDATION.md` |
-| Scheduled feature/ML workflows, backfills and orchestration resilience | Planned Days 42–45 (M8); section 7.4 |
+| Scheduled managed features and mature tracked model candidates | Implemented Day 42; `DAY42_SCHEDULED_WORKFLOWS.md` |
+| Backfills, durable retry mapping and orchestration resilience | Planned Days 43–45 (M8); section 7.4 |
 | Unified operational dashboards and packaged portfolio release | Planned for M9–M10 |
 
-The current checkpoint is **Day 41 complete (M1–M7 complete; M8 in progress)**. Target-only sections below use
+The current checkpoint is **Day 42 complete (M1–M7 complete; M8 in progress)**. Target-only sections below use
 future tense where practical; see `PYMK_ROADMAP.md` for acceptance criteria.
 
 ### 1.2 Delivery and acceptance rules
@@ -193,7 +194,7 @@ flowchart LR
     INVALIDATE -->|"retry exhausted"| DLT
 ```
 
-Ranking stages run in-process behind Java interfaces at the Day 41 checkpoint;
+Ranking stages run in-process behind Java interfaces at the Day 42 checkpoint;
 L2 and re-ranking are opt-in. Dashed edges denote planned
 orchestration/tracking, not request-time dependencies. Ingestion/outbox publishing
 and independent durable consumers with live feature/cache projections are implemented.
@@ -220,7 +221,7 @@ a separate microservice.
 | Batch / ETL | Spring Batch | Implemented restartable jobs; automatic schedules arrive in M8 |
 | Async / messaging (M6) | Apache Kafka 3.9.1 + Spring Kafka | Outbox, consumers, DLT recovery, live windows, cache epochs, restart resilience and Micrometer monitoring through Day 35 |
 | Experiment/model lifecycle (M7) | MLflow 3.17.1 Tracking + Model Registry | Implemented Days 36–40: isolation, tracking, pinned registry, local guarded promotion and lifecycle recovery |
-| Workflow orchestration (M8 in progress) | Apache Airflow 3.2.2 | Day 41 isolated metadata, bounded LocalExecutor, packaged runtime and contract DAG; production workflows planned Days 42–45 |
+| Workflow orchestration (M8 in progress) | Apache Airflow 3.2.2 | Isolated metadata, bounded LocalExecutor and packaged runtime; Day 42 managed feature/mature candidate DAGs; recovery/backfill expansion Days 43–45 |
 | Graph traversal | Postgres recursive CTE (v1) → Neo4j (v2, optional module) | n-hop neighbor candidate generation |
 | Vector similarity | pgvector extension on Postgres | Embedding-based retrieval (EBR) candidate source |
 | ML training / serving | Python scikit-learn for L1; PyTorch for L2; ONNX Runtime Java for serving | Implemented through Day 30; L1 remains the default, with explicit L2/re-ranking opt-in |
@@ -249,7 +250,7 @@ pymk/
 ├── pymk-event-stream/        # frozen contracts, source/DLT topology and replay; API owns ingress/outbox/consumer transactions
 ├── pymk-datagen/             # one-off synthetic dataset generator for local development
 ├── pymk-ml-training/         # Python CLIs and artifacts; MLflow adapters planned M7
-├── orchestration/airflow/    # Day 41 runtime-contract DAG, worker image and tests; job adapters expand Days 42–45
+├── orchestration/airflow/    # Runtime-contract, managed feature and mature candidate DAGs; packaged adapters and tests
 ├── infra/                    # Compose/init SQL; optional Kafka, MLflow and Airflow profiles
 └── docs/
     └── PYMK_DESIGN.md (this file)
@@ -1023,7 +1024,7 @@ Retention is **retain-all**: no automatic registry garbage collection or age-bas
 artifact deletion. Preserve raw frozen datasets and serving database backups
 separately from MLflow backups. See the [Day 40 runbook](DAY40_LIFECYCLE_RECOVERY.md).
 
-### 7.4 Airflow orchestration and batch operations (Day 41 implemented; Days 42–45 planned)
+### 7.4 Airflow orchestration and batch operations (Days 41–42 implemented; Days 43–45 planned)
 
 Airflow follows MLflow and absorbs the previously planned batch-operations
 milestone. It owns schedule/dependency/retry coordination, not business logic or
@@ -1048,9 +1049,23 @@ explicit ended UTC intervals, source SHA-256 and safe output identity. It runs
 actual Python/Java parity, with timeouts, one retry and reference-only XCom.
 Offline imports execute no jobs/network calls. Live acceptance verifies authentication,
 identical-work reuse, invalid-interval rejection and process recreation retaining
-completed run/log/artifact evidence. This foundation neither mutates serving nor
-implements the future production workflows below. See the [Day 41 runbook](DAY41_AIRFLOW_FOUNDATION.md)
+completed run/log/artifact evidence. This foundation DAG does not mutate serving;
+the separate Day 42 DAGs implement feature/model work. See the [Day 41 runbook](DAY41_AIRFLOW_FOUNDATION.md)
 for launch commands, measured resources and acceptance scope.
+
+**Scheduled workflows (Day 42).** `pymk_feature_refresh` runs daily at 02:00 UTC;
+`pymk_model_candidate` runs weekly on Sunday at 04:00 UTC. Explicit data-interval
+timetables, checksum-bound input manifests and separate historical label-maturity
+validation prevent fresh snapshots from being immediately used as training labels.
+An opt-in Compose overlay connects workers to application PostgreSQL and MLflow.
+The allowlisted Java adapter checks terminal batch execution status and source
+revision before acknowledging managed staging or registered exports. Python
+workers require acknowledged MLflow tracking, frozen exported-cohort evaluation and validation-only
+blend tuning before preparing both Java-validated model candidates. No task can
+activate a serving release. Failed quality gates remain recorded and ineligible.
+XCom contains only references; outputs and prior evidence are checksum-bound.
+These DAGs have zero automatic retries and reject existing output directories until
+Day 44 implements durable recovery mapping. See the [Day 42 runbook](DAY42_SCHEDULED_WORKFLOWS.md).
 
 | Component | Owns | Must not become |
 |---|---|---|
@@ -1072,13 +1087,14 @@ Airflow's tooling owns its metadata upgrades, separate from PYMK Flyway and
 MLflow. Back up before upgrades and test resume with the pinned deployment;
 see [Airflow upgrades](https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading.html).
 
-Planned DAG boundaries (names are proposed, not existing commands):
+DAG boundaries (only the feature and candidate workflows are implemented here;
+remaining names are proposed, not existing commands):
 
 | Workflow | Trigger / inputs | Result and release boundary |
 |---|---|---|
 | `pymk_projection_reconcile` | Nightly; explicit event and ingestion watermark | Reconcile recent Kafka projections from PostgreSQL; never mutate historical exports |
-| `pymk_feature_refresh` | Nightly or operator; frozen source/transform and compatible release | Stage complete managed feature/vector generations; active data remains unchanged until approval |
-| `pymk_model_candidate` | Mature datasets available; explicit dataset/cohort versions | Export, tracked L1/L2 training, frozen evaluation and validation-only blend tuning; output an unactivated candidate |
+| `pymk_feature_refresh` (Day 42) | Daily 02:00 UTC or operator; pinned source revision/profiles/transform | Stage complete managed feature/vector generations; active data remains unchanged until approval |
+| `pymk_model_candidate` (Day 42) | Weekly Sunday 04:00 UTC or operator; mature historical releases and pinned cohort/policies | Export, tracked L1/L2 training, frozen evaluation and validation-only blend tuning; prepare unactivated candidates |
 | `pymk_release_prepare` | Exact candidate manifest and approval context | Model-sync, bundle validation and rollout plan; operator-controlled activation/rollback |
 | `pymk_offline_evaluation` | Weekly or candidate release; frozen evaluation cohort | Versioned comparison report, MLflow lineage and quality history |
 | `pymk_graph_refresh` | Daily where a separate graph index is configured | Versioned index with coverage checks; not a mandatory Neo4j deployment |
@@ -1261,7 +1277,7 @@ size and realized exposure instead of claiming an unconditional percentage cap.
 5. **M5 — Re-ranker**: blending + exposure diversification, validation-only Bayesian weight tuning, immutable configuration/report artifacts and a seeded-to-packaged-HTTP rollback demo are **complete through Day 30**. No automatic production promotion or causal lift is claimed.
 6. **M6 — Kafka event backbone (complete through Day 35)**: infrastructure/contracts, ingestion/outbox, independent consumers, retries/DLT replay, live windows, cache epochs, finite reconciliation, restart resilience and operational metrics implemented and verified. See the Day 35 runbook for regression and packaged-application evidence.
 7. **M7 — MLflow experiment and model lifecycle (complete)**: Days 36–40 infrastructure, persistent storage, opt-in tracking, exact registered ONNX versions, guarded local-operator promotion, fail-closed preparation, coordinated lifecycle recovery, rollback validation and retain-all recovery runbook implemented.
-8. **M8 — Airflow orchestration + batch operations (in progress)**: Day 41 infrastructure and packaged runtime-contract DAG implemented. Days 42–45 add production schedules, mature-data dependencies, durable retry identities, reconciliation, safe backfills and controlled release workflows.
+8. **M8 — Airflow orchestration + batch operations (in progress)**: Days 41–42 provide infrastructure, packaged runtime, managed feature schedules and mature tracked model-candidate workflows. Days 43–45 add durable retry identities, reconciliation, safe backfills and controlled release/resilience workflows.
 9. **M9 — Observability + offline eval dashboard (planned)**: Micrometer/Grafana, Kafka/outbox/consumer-lag telemetry, MLflow/Airflow operational visibility, and Recall@k tracking over time.
 10. **M10 — Polish for portfolio (planned)**: one-command lightweight/full Kafka/MLflow/Airflow Compose profiles, architecture/runbook documentation, load-test evidence, sample requests, recovery drills and reproducible offline evaluation.
 

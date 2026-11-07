@@ -1,0 +1,14 @@
+# Explicit opt-in network/credentials for Day 42; the Day 41 foundation stays isolated.
+# Compose with docker-compose.yml and profiles airflow,mlflow. Start postgres separately.
+x-workflow: &workflow
+  networks: [airflow, default, mlflow]
+  environment:
+    SPRING_DATASOURCE_URL: ${PYMK_WORKFLOW_JDBC_URL:-jdbc:postgresql://postgres:5432/pymk}
+    SPRING_DATASOURCE_USERNAME: ${PYMK_WORKFLOW_DB_USER:-pymk}
+    SPRING_DATASOURCE_PASSWORD: ${PYMK_WORKFLOW_DB_PASSWORD:-}
+    PYMK_WORKFLOW_TRACKING_URI: http://mlflow:5000
+services:
+  airflow-api:
+    <<: *workflow
+  airflow-scheduler:
+    <<: *workflow

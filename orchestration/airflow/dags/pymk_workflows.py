@@ -33,7 +33,7 @@ def launch_step(workflow, step, predecessor, params, ti, data_interval_start=Non
 
 
 def make_dag(name, workflow, schedule, steps):
-    with DAG(name, start_date=pendulum.datetime(2026, 1, 1, tz="UTC"), schedule=CronDataIntervalTimetable(schedule, timezone="UTC"),
+    with DAG(name, start_date=pendulum.datetime(2026, 1, 1, tz="UTC"), schedule=CronDataIntervalTimetable(schedule, timezone="UTC") if schedule else None,
              catchup=False, max_active_runs=1, max_active_tasks=1, dagrun_timeout=timedelta(hours=5),
              default_args={"retries": 0, "execution_timeout": timedelta(minutes=56), "pool": "pymk_jobs"},
              params={"manifest": Param(None, type=["null", "object"],
@@ -51,3 +51,5 @@ def make_dag(name, workflow, schedule, steps):
 
 feature_dag = make_dag("pymk_feature_refresh", "feature", "0 2 * * *", ("validate", "embeddings", "stage"))
 candidate_dag = make_dag("pymk_model_candidate", "candidate", "0 4 * * 0", ("validate", "export", "light", "heavy", "evaluate", "blend", "prepare"))
+reconciliation_dag = make_dag("pymk_live_reconciliation", "reconcile", "0 3 * * *", ("validate", "reconcile"))
+backfill_dag = make_dag("pymk_historical_backfill", "backfill", None, ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare"))

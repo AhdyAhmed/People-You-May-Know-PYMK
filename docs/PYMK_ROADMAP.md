@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 42 complete (M1–M7 complete; M8 in progress).
+**Current checkpoint:** Day 43 complete (M1–M7 complete; M8 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Days 36–40 deliver the MLflow lifecycle. Days 41–42 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules and mature tracked model-candidate workflows. Day 43 reconciliation and reproducible backfills are next.
+Days 36–40 deliver the MLflow lifecycle. Days 41–43 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules, mature tracked model-candidate workflows, finite reconciliation and retained-export backfills. Day 44 retry/restart identities and controlled release workflows are next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow lifecycle and the Airflow foundation are implemented; scheduled feature/model workflows, backfills and orchestration resilience remain Days 42–45.
+release (M10). MLflow lifecycle, Airflow schedules, reconciliation and retained-export backfills are implemented; durable recovery and orchestration resilience remain Days 44–45.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–41 are the implementation record. Unchecked future days below
+Completed Days 1–43 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–41 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–43 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -381,7 +381,16 @@ in a recommendation request. See design section 7.4.
 - Implemented daily `pymk_feature_refresh` and independent weekly `pymk_model_candidate`, explicit UTC interval timetables, reviewed checksum-bound source manifests, completion-aware Java receipts and isolated Python CLI workers. Training, frozen exported-cohort evaluation and validation-only blend tuning require acknowledged MLflow publication; both models receive production Java validation before candidate preparation. No activation is scheduled.
 - Verified 2026-10-16: 278 Java tests (zero failures/errors/skips), 106 Python tests, 17 Airflow tests, complete live candidate preparation, immature-label rejection and failed-refresh isolation with retained prior generations. Zero automatic workflow retries until Day 44 supplies durable recovery mapping. Setup, evidence and interrupted-run accounting: [Day 42 runbook](DAY42_SCHEDULED_WORKFLOWS.md).
 
-**Day 43 — Kafka reconciliation + reproducible backfills**
+**Day 43 — Kafka reconciliation + reproducible backfills ✅**
+
+Implementation and acceptance procedure: [Day 43 runbook](DAY43_RECONCILIATION_BACKFILLS.md).
+Verified 2026-10-16: 279 Java tests with zero failures/errors/skips after correcting
+the broker-restart test recovery budget, 106 Python tests, 20 offline Airflow tests
+and authenticated live Days 41–43 workflows. Replay converged without changing
+historical dataset registrations or the active serving release.
+Historical backfills replay retained exported datasets into new model candidate
+versions, not arbitrary bitemporal queries over current profiles. The existing
+PostgreSQL graph adjacency needs no separate index-refresh DAG.
 
 - Schedule finite reconciliation of streaming projections against PostgreSQL at declared event/ingestion watermarks, leaving continuous consumers in `pymk-event-stream`. Include window expiry, late arrivals, deduplication retention and DLT/replay runbook integration.
 - Require explicit historical source revisions, feature/knowledge cutoffs, label maturity and destination versions for backfills. Missing historical inputs fail validation; never substitute current profiles or overwrite published datasets. Backfills cannot activate a serving release automatically.

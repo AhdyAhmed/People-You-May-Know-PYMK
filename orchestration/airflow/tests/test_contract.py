@@ -43,15 +43,17 @@ class DagStructureTest(unittest.TestCase):
              patch("socket.socket.connect", side_effect=AssertionError("DAG parsing contacted a service")):
             bag = DagBag(dag_folder="/opt/airflow/dags", include_examples=False)
         self.assertEqual(bag.import_errors, {})
-        self.assertEqual(set(bag.dags), {"pymk_runtime_contract", "pymk_feature_refresh", "pymk_model_candidate"})
+        self.assertEqual(set(bag.dags), {"pymk_runtime_contract", "pymk_feature_refresh", "pymk_model_candidate", "pymk_live_reconciliation", "pymk_historical_backfill"})
         for name, steps in (("pymk_feature_refresh", ["validate", "embeddings", "stage"]),
-                            ("pymk_model_candidate", ["validate", "export", "light", "heavy", "evaluate", "blend", "prepare"])):
+                            ("pymk_model_candidate", ["validate", "export", "light", "heavy", "evaluate", "blend", "prepare"]),
+                            ("pymk_live_reconciliation", ["validate", "reconcile"]),
+                            ("pymk_historical_backfill", ["validate", "restore", "light", "heavy", "evaluate", "blend", "prepare"])):
             workflow = bag.dags[name]
             self.assertFalse(workflow.catchup)
             self.assertEqual(workflow.max_active_runs, 1)
             self.assertEqual(str(workflow.timezone), "UTC")
             self.assertEqual(workflow.task_ids, steps)
-            self.assertEqual(type(workflow.timetable).__name__, "CronDataIntervalTimetable")
+            self.assertEqual(type(workflow.timetable).__name__, "NullTimetable" if name == "pymk_historical_backfill" else "CronDataIntervalTimetable")
             for index, task in enumerate(workflow.tasks):
                 self.assertEqual(task.pool, "pymk_jobs")
                 self.assertEqual(task.retries, 0)

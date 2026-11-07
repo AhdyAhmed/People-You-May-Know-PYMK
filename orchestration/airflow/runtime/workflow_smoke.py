@@ -103,6 +103,60 @@ def main():
     assert sql("SELECT release_id,manifest_sha256,state FROM pymk_serving_releases WHERE release_id LIKE 'history-%' ORDER BY release_id") == retained
     assert sql("SELECT state FROM pymk_serving_releases WHERE release_id='fresh-generation'")[0][0] == "STAGED"
     print("PASS: managed generations retained; failed refresh isolated; mature tracked L1/L2, evaluation, blend and Java-validated candidates; no activation", flush=True)
+    if "--day43" in sys.argv:
+        day43(token, plan)
+
+
+def day43(token, candidate_plan):
+    from datetime import datetime, timedelta, timezone
+    original_exports = sql("SELECT dataset_id,csv_sha256,provenance::text FROM pymk_training_datasets_v2 ORDER BY dataset_id")
+    active = sql("SELECT release_id,epoch FROM pymk_active_release")
+    plan = copy.deepcopy(candidate_plan)
+    plan.update(workflow="backfill", outputVersion="day43-backfill")
+    now = datetime.now(timezone.utc)
+    plan["intervalStart"] = (now-timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    plan["intervalEnd"] = now.isoformat().replace("+00:00", "Z")
+    for i, item in enumerate(plan["history"]):
+        for name in ("light", "heavy"):
+            csv = w.ROOT / f"workflows/day42-candidate/export/{name}-{i}.csv"
+            metadata = Path(str(csv) + ".provenance.json")
+            item[name] = {"csv": w.reference(csv), "provenance": w.reference(metadata)}
+        provenance = w.read(item["heavy"]["provenance"])
+        item.update(knowledgeCutoff=provenance["exportedAt"],
+                    featureSourceRevision=str(provenance["featureSourceRevision"]),
+                    labelSourceRevision=str(provenance["labelSourceRevision"]))
+    # Change present-day labels: a frozen backfill must remain byte-for-byte independent.
+    sql("INSERT INTO member_events(actor_member_id,target_member_id,type,occurred_at) VALUES (1,3,'INVITE_ACCEPTED','2026-01-06')")
+    run_dag(token, "pymk_historical_backfill", "day43-backfill", plan)
+    for i, item in enumerate(plan["history"]):
+        for name in ("light", "heavy"):
+            assert w.digest(w.ROOT / f"workflows/day43-backfill/restore/{name}-{i}.csv") == item[name]["csv"]["sha256"]
+    assert (w.ROOT / "workflows/day43-backfill/prepare/heavy/candidate.json").is_file()
+    invalid = copy.deepcopy(plan)
+    invalid["outputVersion"] = "day43-bad-revision"
+    invalid["history"][0]["featureSourceRevision"] = "999999"
+    run_dag(token, "pymk_historical_backfill", "day43-bad-revision", invalid, "failed")
+    assert not (w.ROOT / "workflows/day43-bad-revision").exists()
+    # Seed a retained consumer journal, then simulate a missing live effect.
+    sql("""INSERT INTO event_consumer_receipt(consumer_name,event_id,content_fingerprint)
+        VALUES ('pymk.feature-projection.v1','00000000-0000-0000-0000-000000000043',repeat('a',64));
+        INSERT INTO event_consumer_journal VALUES ('pymk.feature-projection.v1',
+        '00000000-0000-0000-0000-000000000043','PROFILE_VIEW',1,2,'2026-01-20','2026-01-24',NULL,
+        '{}','synthetic-day43-fixture',0,0,0);
+        DELETE FROM live_member_event WHERE event_id='00000000-0000-0000-0000-000000000043';""")
+    reconcile = {"schemaVersion": 1, "workflow": "reconcile", "outputVersion": "day43-repair",
+                 "intervalStart": "2026-01-24T00:00:00Z", "intervalEnd": "2026-01-25T00:00:00Z",
+                 "windowStart": "2026-01-01T00:00:00Z", "knowledgeCutoff": "2026-01-25T00:00:00Z"}
+    query = "SELECT event_id,event_type,subject_member_id,target_member_id,occurred_at,ingested_at FROM live_member_event WHERE generation=(SELECT generation FROM live_projection_active) ORDER BY event_id"
+    run_dag(token, "pymk_live_reconciliation", "day43-repair", reconcile)
+    repaired = sql(query)
+    assert len(repaired) == 1
+    reconcile["outputVersion"] = "day43-replay"
+    run_dag(token, "pymk_live_reconciliation", "day43-replay", reconcile)
+    assert sql(query) == repaired
+    assert sql("SELECT dataset_id,csv_sha256,provenance::text FROM pymk_training_datasets_v2 ORDER BY dataset_id") == original_exports
+    assert sql("SELECT release_id,epoch FROM pymk_active_release") == active
+    print("PASS: Day 43 real backfill candidates, changed-current-data isolation, revision rejection, reconciliation replay convergence and unchanged historical exports/active release", flush=True)
 
 
 if __name__ == "__main__": main()

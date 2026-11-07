@@ -169,6 +169,37 @@ class LiveProjectionTest {
         mvc.perform(get("/api/v1/members/{id}/live-features/{candidateId}", A, 999999999)).andExpect(status().isNotFound());
     }
 
+    @Test void manualAndScheduledReconciliationShareDatabaseFence() throws Exception {
+        feature(event(StreamEventType.PROFILE_VIEW, END.minusSeconds(1), END, 0));
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var scheduled = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
+                long generation = store.reconcile(START, END, END);
+                locked.countDown();
+                try {
+                    if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                        throw new IllegalStateException("Test latch timeout");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(ex);
+                }
+                return generation;
+            }));
+            assertThat(locked.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var manual = pool.submit(() -> store.reconcile(START, END, END));
+            try {
+                assertThatThrownBy(() -> manual.get(200, java.util.concurrent.TimeUnit.MILLISECONDS))
+                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            } finally { release.countDown(); }
+            long first = scheduled.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            long second = manual.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(second).isGreaterThan(first);
+            assertThat(counts().generation()).isEqualTo(second);
+            assertThat(counts().profileViews()).isEqualTo(1);
+        } finally { release.countDown(); }
+    }
+
     @Test void concurrentDeliveryWaitsForGenerationSwapAndWritesToNewGeneration() throws Exception {
         var locked = new java.util.concurrent.CountDownLatch(1);
         var release = new java.util.concurrent.CountDownLatch(1);

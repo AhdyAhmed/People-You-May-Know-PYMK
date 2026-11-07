@@ -18,16 +18,17 @@ public final class WorkflowBatchRunner {
         var json = new ObjectMapper();
         var request = json.readTree(Files.readAllBytes(Path.of(args[0])));
         String jobName = request.path("job").asText();
-        if (!Set.of("embeddingRefreshJob", "servingReleaseJob").contains(jobName))
+        if (!Set.of("embeddingRefreshJob", "servingReleaseJob", "liveFeatureReconciliationJob").contains(jobName))
             throw new IllegalArgumentException("Unsupported workflow job");
         var parameters = request.path("parameters");
         if (jobName.equals("servingReleaseJob") && !Set.of("export", "export-v2").contains(parameters.path("action").asText()))
             throw new IllegalArgumentException("Only immutable exports are allowed");
         String revision = request.path("sourceRevision").asText();
-        if (!revision.matches("[0-9]+")) throw new IllegalArgumentException("Explicit source revision required");
+        boolean reconciliation = jobName.equals("liveFeatureReconciliationJob");
+        if (!reconciliation && !revision.matches("[0-9]+")) throw new IllegalArgumentException("Explicit source revision required");
         try (var context = SpringApplication.run(PymkBatchApplication.class, "--spring.batch.job.enabled=false")) {
             var jdbc = context.getBean(JdbcTemplate.class);
-            checkRevision(jdbc, revision);
+            if (!reconciliation) checkRevision(jdbc, revision);
             var builder = new JobParametersBuilder();
             parameters.fields().forEachRemaining(item -> {
                 if (!item.getValue().isTextual()) throw new IllegalArgumentException("String parameters required");
@@ -36,7 +37,7 @@ public final class WorkflowBatchRunner {
             var execution = context.getBean(JobLauncher.class).run(context.getBean(jobName, Job.class), builder.toJobParameters());
             if (execution.getStatus() != BatchStatus.COMPLETED || !"COMPLETED".equals(execution.getExitStatus().getExitCode()))
                 throw new IllegalStateException("Batch execution did not complete: " + execution.getId());
-            checkRevision(jdbc, revision);
+            if (!reconciliation) checkRevision(jdbc, revision);
             if (jobName.equals("embeddingRefreshJob")) {
                 var manifest = EmbeddingReleaseManifest.read(parameters.path("manifestPath").asText());
                 var row = jdbc.queryForMap("SELECT state, source_fingerprint FROM pymk_serving_releases WHERE release_id=?", manifest.id());
@@ -45,6 +46,15 @@ public final class WorkflowBatchRunner {
             }
             var receipt = json.createObjectNode().put("job", jobName).put("executionId", execution.getId())
                     .put("status", "COMPLETED").put("sourceRevision", revision).put("automaticPromotion", false);
+            if (reconciliation) {
+                receipt.remove("sourceRevision");
+                receipt.set("watermarks", parameters);
+                long generation = execution.getStepExecutions().stream()
+                        .filter(step -> step.getExecutionContext().containsKey("liveGeneration"))
+                        .mapToLong(step -> step.getExecutionContext().getLong("liveGeneration"))
+                        .findFirst().orElseThrow(() -> new IllegalStateException("Missing reconciled generation"));
+                receipt.put("liveGeneration", generation);
+            }
             Files.writeString(Path.of(args[1]), json.writeValueAsString(receipt), java.nio.file.StandardOpenOption.CREATE_NEW);
         }
     }

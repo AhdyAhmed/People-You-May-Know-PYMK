@@ -13,7 +13,9 @@ ROOT = Path(os.environ.get("PYMK_WORKFLOW_ROOT", "/opt/airflow/artifacts"))
 PYTHON = "/opt/pymk/trainer/bin/python"
 JAR = "/opt/pymk/pymk-batch.jar"
 STEPS = {"feature": ("validate", "embeddings", "stage"),
-         "candidate": ("validate", "export", "light", "heavy", "evaluate", "blend", "prepare")}
+         "candidate": ("validate", "export", "light", "heavy", "evaluate", "blend", "prepare"),
+         "reconcile": ("validate", "reconcile"),
+         "backfill": ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare")}
 
 
 def require(condition, message):
@@ -63,7 +65,7 @@ def select_plan(workflow, supplied, start, end):
 
 
 def instant(value):
-    require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z", value), "Full UTC timestamp required")
+    require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z", value), "Full UTC timestamp required")
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
@@ -72,12 +74,22 @@ def validate(plan, now=None):
     kind = plan.get("workflow")
     require(kind in STEPS and plan.get("schemaVersion") == 1, "Unknown workflow/schema")
     common = {"schemaVersion", "workflow", "intervalStart", "intervalEnd", "outputVersion", "sourceRevision", "transform"}
-    specific = {"profiles"} if kind == "feature" else {"history", "evaluationPolicy", "blendPolicy", "context"}
+    if kind == "reconcile":
+        common -= {"transform", "sourceRevision"}
+        specific = {"windowStart", "knowledgeCutoff"}
+    else:
+        specific = {"profiles"} if kind == "feature" else {"history", "evaluationPolicy", "blendPolicy", "context"}
     require(set(plan) == common | specific, "Unexpected or missing workflow fields")
     start, end = instant(plan["intervalStart"]), instant(plan["intervalEnd"])
     require(start < end <= now and (end-start).total_seconds() <= 7*86400, "Invalid or future interval")
     require(isinstance(plan["outputVersion"], str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", plan["outputVersion"]), "Unsafe output version")
     require(plan["outputVersion"] != "legacy", "Reserved output version")
+    if kind == "reconcile":
+        window = instant(plan["windowStart"])
+        require(window < end and (end-window).total_seconds() <= 90*86400,
+                "Reconciliation window must be positive and at most 90 days")
+        require(end <= instant(plan["knowledgeCutoff"]) <= now, "Invalid ingestion watermark")
+        return plan
     require(isinstance(plan["sourceRevision"], str) and re.fullmatch(r"[0-9]+", plan["sourceRevision"]), "Explicit source revision required")
     transform = read(plan["transform"])
     # The actual transform loader validates the complete schema during computation.
@@ -93,7 +105,10 @@ def validate(plan, now=None):
         previous = None
         ids = set()
         for item in history:
-            require(set(item) == {"releaseId", "featureAsOf", "labelWindowEnd"}, "Invalid history entry")
+            fields = {"releaseId", "featureAsOf", "labelWindowEnd"}
+            if kind == "backfill":
+                fields |= {"knowledgeCutoff", "featureSourceRevision", "labelSourceRevision", "light", "heavy"}
+            require(set(item) == fields, "Invalid history entry")
             ident = item["releaseId"]
             require(isinstance(ident, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", ident) and ident != "legacy" and ident not in ids, "Invalid/duplicate historical release")
             ids.add(ident)
@@ -101,6 +116,28 @@ def validate(plan, now=None):
             require(cutoff <= snapshot < label_end <= end, "Labels are not mature at interval cutoff")
             require(previous is None or previous <= snapshot, "Overlapping/out-of-order label horizons")
             previous = label_end
+            if kind == "backfill":
+                knowledge = instant(item["knowledgeCutoff"])
+                require(label_end <= knowledge <= end, "Historical knowledge cutoff outside mature interval")
+                for field in ("featureSourceRevision", "labelSourceRevision"):
+                    require(isinstance(item[field], str) and re.fullmatch(r"[0-9]+", item[field]), "Historical source revision required")
+                for name, schema in (("light", 1), ("heavy", 2)):
+                    pair = item[name]
+                    require(set(pair) == {"csv", "provenance"}, "Frozen CSV and provenance required")
+                    csv = resolve(pair["csv"])
+                    provenance = read(pair["provenance"])
+                    require(provenance["schemaVersion"] == schema
+                            and provenance["releaseId"] == ident
+                            and provenance["csvSha256"] == digest(csv)
+                            and provenance["transformSha256"] == digest(resolve(plan["transform"]))
+                            and instant(provenance["featureAsOf"].replace("+00:00", "Z")) == snapshot
+                            and instant(provenance["labelWindowEnd"].replace("+00:00", "Z")) == label_end,
+                            "Frozen export provenance mismatch")
+                    if schema == 2:
+                        require(str(provenance["featureSourceRevision"]) == item["featureSourceRevision"]
+                                and str(provenance["labelSourceRevision"]) == item["labelSourceRevision"]
+                                and provenance["exportedAt"].replace("+00:00", "Z") == item["knowledgeCutoff"],
+                                "Historical revision/knowledge mismatch")
     return plan
 
 
@@ -142,7 +179,7 @@ def cli(module, args, directory, tracked=False):
 def batch(plan, job, parameters, directory, label):
     request = directory / (label + "-request.json")
     receipt = directory / (label + "-receipt.json")
-    save(request, {"job": job, "parameters": {k: str(v) for k, v in parameters.items()}, "sourceRevision": plan["sourceRevision"]})
+    save(request, {"job": job, "parameters": {k: str(v) for k, v in parameters.items()}, "sourceRevision": plan.get("sourceRevision")})
     command(["java", "-Dloader.main=com.ahdyahmed.pymk.batch.WorkflowBatchRunner", "-cp", JAR,
              "org.springframework.boot.loader.launch.PropertiesLauncher", request, receipt], directory / (label + ".log"))
     require(json.loads(receipt.read_text())["status"] == "COMPLETED", "Missing completed batch receipt")
@@ -165,9 +202,23 @@ def execute(plan_ref, step, previous=None):
     directory = work / step
     directory.mkdir(parents=True, exist_ok=False)  # fail closed on partial/repeated work; Day 44 adds recovery
     results = dict(prior["results"])
-    transform = resolve(plan["transform"])
+    transform = resolve(plan["transform"]) if "transform" in plan else None
     version = plan["outputVersion"]
-    if step == "embeddings":
+    if step == "reconcile":
+        batch(plan, "liveFeatureReconciliationJob", {"windowStart": plan["windowStart"],
+            "windowEnd": plan["intervalEnd"], "knowledgeCutoff": plan["knowledgeCutoff"],
+            "runId": version}, directory, "reconcile")
+    elif step == "restore":
+        # Copy only retained exports, never query present-day profiles or labels.
+        results["lightInputs"], results["heavyInputs"] = [], []
+        for i, item in enumerate(plan["history"]):
+            for name in ("light", "heavy"):
+                output = directory / f"{name}-{i}.csv"
+                with output.open("xb") as stream:
+                    stream.write(resolve(item[name]["csv"]).read_bytes())
+                save(Path(str(output) + ".provenance.json"), read(item[name]["provenance"]))
+                results[name + "Inputs"].append(str(output))
+    elif step == "embeddings":
         vectors, manifest = directory / "vectors.csv", directory / "release.json"
         cli("profile_embeddings", ["--input", resolve(plan["profiles"]), "--artifact", transform,
             "--output", vectors, "--as-of", plan["intervalEnd"]], directory)

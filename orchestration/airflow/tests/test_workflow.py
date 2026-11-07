@@ -40,6 +40,57 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(w.validate(self.plan), self.plan)
         self.assertEqual(w.validate(self.candidate())["workflow"], "candidate")
 
+    def backfill(self):
+        plan = self.candidate()
+        plan["workflow"] = "backfill"
+        for i, item in enumerate(plan["history"]):
+            item.update(knowledgeCutoff="2026-01-24T00:00:00Z", featureSourceRevision="2", labelSourceRevision="3")
+            for name, schema in (("light", 1), ("heavy", 2)):
+                csv = self.root / f"{name}-{i}.csv"
+                csv.write_text("retained immutable fixture")
+                metadata = self.root / f"{name}-{i}.json"
+                metadata.write_text(json.dumps({"schemaVersion": schema, "releaseId": item["releaseId"],
+                    "featureAsOf": item["featureAsOf"], "labelWindowEnd": item["labelWindowEnd"],
+                    "csvSha256": w.digest(csv), "transformSha256": self.ref["sha256"],
+                    "featureSourceRevision": "2", "labelSourceRevision": "3", "exportedAt": item["knowledgeCutoff"]}))
+                item[name] = {"csv": w.reference(csv), "provenance": w.reference(metadata)}
+        return plan
+
+    def test_backfill_restores_exact_bytes_without_database_or_cli(self):
+        plan = self.backfill()
+        path = self.root / "backfill.json"
+        w.save(path, plan)
+        ref = w.reference(path)
+        with patch.object(w, "batch", side_effect=AssertionError("Current database queried")), \
+             patch.object(w, "cli", side_effect=AssertionError("Unexpected computation")):
+            previous = w.execute(ref, "validate")
+            result = w.read(w.execute(ref, "restore", previous))
+        self.assertEqual(len(result["results"]["heavyInputs"]), 3)
+        self.assertEqual(w.digest(result["results"]["heavyInputs"][0]), plan["history"][0]["heavy"]["csv"]["sha256"])
+        self.assertFalse(result["automaticPromotion"])
+        with self.assertRaises(FileExistsError): w.execute(ref, "restore", previous)
+
+    def test_backfill_rejects_missing_mutated_or_wrong_historical_inputs(self):
+        plan = self.backfill()
+        for field, value in (("featureSourceRevision", "999"), ("labelSourceRevision", "999"),
+                             ("knowledgeCutoff", "2026-01-23T00:00:00Z")):
+            invalid = copy.deepcopy(plan)
+            invalid["history"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError): w.validate(invalid)
+        csv = w.resolve(plan["history"][0]["heavy"]["csv"])
+        csv.write_text("changed")
+        with self.assertRaisesRegex(ValueError, "checksum"): w.validate(plan)
+        csv.unlink()
+        with self.assertRaises(FileNotFoundError): w.validate(plan)
+
+    def test_reconciliation_requires_bounded_event_and_ingestion_watermarks(self):
+        plan = {key: self.plan[key] for key in ("schemaVersion", "intervalStart", "intervalEnd", "outputVersion")}
+        plan.update(workflow="reconcile", windowStart="2026-01-01T00:00:00Z", knowledgeCutoff="2026-01-03T00:00:00Z")
+        self.assertEqual(w.validate(plan), plan)
+        for field, value in (("windowStart", "2025-01-01T00:00:00Z"), ("windowStart", plan["intervalEnd"]),
+                             ("knowledgeCutoff", "2026-01-02T00:00:00Z"), ("knowledgeCutoff", "2099-01-01T00:00:00Z")):
+            with self.subTest(field=field), self.assertRaises(ValueError): w.validate({**plan, field: value})
+
     def test_maturity_rejects_future_and_overlapping_labels(self):
         plan = self.candidate()
         plan["history"][-1]["labelWindowEnd"] = "2026-01-26T00:00:00Z"

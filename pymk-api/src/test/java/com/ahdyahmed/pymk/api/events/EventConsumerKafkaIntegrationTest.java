@@ -89,7 +89,10 @@ class EventConsumerKafkaIntegrationTest {
                 Long.class, group, id);
     }
     void appliedBoth(UUID id) {
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+        appliedBoth(id, Duration.ofSeconds(30));
+    }
+    void appliedBoth(UUID id, Duration timeout) {
+        await().atMost(timeout).untilAsserted(() -> {
             assertThat(effects(FEATURE, id)).isEqualTo(1);
             assertThat(effects(CACHE, id)).isEqualTo(1);
         });
@@ -177,7 +180,9 @@ class EventConsumerKafkaIntegrationTest {
             assertThat(metrics.get("pymk.events.outbox.pending").gauge().value()).isGreaterThanOrEqualTo(3);
             assertThat(gauge("pymk.events.projection.pending", "group", FEATURE)).isGreaterThanOrEqualTo(3);
         } finally { docker.startContainerCmd(KAFKA.getContainerId()).exec(); }
-        for (UUID id : ids) appliedBoth(id);
+        // A restarted coordinator can wait for Kafka's 45-second session expiry.
+        // Keep normal delivery assertions at 30s; recovery includes broker boot and rebalance.
+        for (UUID id : ids) appliedBoth(id, Duration.ofSeconds(90));
         assertThat(jdbc.queryForList("""
                 SELECT event_id FROM event_consumer_journal
                 WHERE consumer_name = ? AND subject_member_id = 35101 ORDER BY source_offset

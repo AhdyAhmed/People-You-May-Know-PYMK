@@ -6,7 +6,7 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 42 complete (M1–M7 complete; M8 in progress).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 43 complete (M1–M7 complete; M8 in progress).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > Kafka ingestion/outbox, independently deduplicated journal consumers, bounded retries and acknowledged dead-letter recovery are implemented.
 > Live feature windows, durable cache invalidation, finite reconciliation and Kafka monitoring are implemented and verified. Optional MLflow infrastructure and opt-in tracking for all five ML workflows are verified.
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 42 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 43 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -302,6 +302,19 @@ parameters and runs real Python/Java ONNX parity; it does not activate releases
 or schedule production training. See the [Day 41 setup/runbook](docs/DAY41_AIRFLOW_FOUNDATION.md)
 and `./scripts/day41-airflow-smoke.ps1`.
 
+### Day 43 reconciliation and historical backfills
+
+Airflow now includes daily finite live-projection reconciliation and a separate
+manual historical backfill DAG. Backfills train new candidates from retained,
+checksum-pinned exports with explicit historical revisions and knowledge cutoffs;
+they never query today's labels or automatically activate a release. Both paths
+share bounded resources with normal workflows. See the
+[Day 43 runbook](docs/DAY43_RECONCILIATION_BACKFILLS.md).
+
+```powershell
+./scripts/day42-airflow-workflows-smoke.ps1 -IncludeDay43
+```
+
 ### Day 42 scheduled feature and ML workflows
 
 `pymk_feature_refresh` stages managed generations daily; the separate weekly
@@ -396,7 +409,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M8 - Day 42: Scheduled feature and ML workflows","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M8 - Day 43: Reconciliation and reproducible backfills","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -794,7 +807,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 40 — MLflow lifecycle recovery**: real registry/artifact outages, coordinated backup/restore and exact candidate reproduction, concurrent promotion fencing, rollback artifact revalidation and retain-all lifecycle runbook. Verified 2026-10-15: 275 Java tests, 106 Python tests, live restore/replay and packaged HTTP/rollback/Kafka recovery. See [acceptance evidence](docs/DAY40_LIFECYCLE_RECOVERY.md#acceptance-record).
 - [x] **Day 41 — Airflow infrastructure and workflow contracts**: isolated authenticated Compose profile, bounded local workers with packaged Java/Python, pure DAG parsing, explicit UTC parameters, real scheduler execution and persistence checks. See [acceptance evidence](docs/DAY41_AIRFLOW_FOUNDATION.md#acceptance-measurements).
 - [x] **Day 42 — Scheduled feature and ML workflows**: daily managed refresh, independent weekly mature exports and tracked L1/L2/evaluation/blend/candidate preparation, completion-aware adapters, failed-refresh isolation and no automatic activation. Verified 2026-10-16: 278 Java tests, 106 Python tests, 17 Airflow tests and live positive/negative workflows. See [acceptance evidence](docs/DAY42_SCHEDULED_WORKFLOWS.md#acceptance).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 43 is next.
+- [x] **Day 43 — Reconciliation and reproducible backfills**: scheduled database-fenced live repair, manual frozen-export backfills, explicit historical revisions/knowledge cutoffs, shared resource bounds and no automatic activation. Verified 2026-10-16: 279 Java tests, 106 Python tests, 20 Airflow tests and live replay/backfill checks. See [acceptance evidence](docs/DAY43_RECONCILIATION_BACKFILLS.md#acceptance).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 44 is next.
 
 ## License
 

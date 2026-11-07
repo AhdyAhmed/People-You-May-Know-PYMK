@@ -1,4 +1,4 @@
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [switch]$IncludeDay43)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 $run = [guid]::NewGuid().ToString('N').Substring(0,10)
@@ -36,9 +36,12 @@ try {
     & docker run --rm --network none --entrypoint python pymk-airflow:3.2.2-day41 -m unittest discover -s /opt/pymk/tests -v *> "$output/contracts.log"
     if ($LASTEXITCODE -ne 0) { throw "Offline tests failed: $output/contracts.log" }
     Compose @('up','-d','--wait','--wait-timeout','240','workflow-postgres','mlflow','airflow-api','airflow-scheduler','airflow-dag-processor')
-    Compose @('exec','-T','airflow-api','python','/opt/pymk/workflow_smoke.py')
+    $workerArguments = @('exec','-T','airflow-api','python','/opt/pymk/workflow_smoke.py')
+    if ($IncludeDay43) { $workerArguments += '--day43' }
+    Compose $workerArguments
     Compose @('exec','-T','airflow-api','python','/opt/pymk/smoke.py','run')
-    Write-Host "PASS: Day 42 scheduled workflows and Day 41 regression. Evidence: $output"
+    $scope = if ($IncludeDay43) { 'Days 41-43 workflows, reconciliation and historical backfills' } else { 'Day 42 scheduled workflows and Day 41 regression' }
+    Write-Host "PASS: $scope. Evidence: $output"
 } finally {
     if ($project -notmatch '^pymk-day42-[a-f0-9]{10}$') { throw 'Unsafe cleanup target' }
     & docker @compose logs --no-color *> "$output/services.log"

@@ -1,4 +1,5 @@
 import copy
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -24,6 +25,12 @@ class WorkflowTest(unittest.TestCase):
         self.file = self.root / "transform.json"
         self.file.write_text(json.dumps({"payload": {"metadata": {"fitCutoff": "2026-01-01T00:00:00Z"}}}))
         self.ref = w.reference(self.file)
+        self.jar_patch = patch.object(w, "JAR", str(self.file))
+        self.jar_patch.start()
+        self.addCleanup(self.jar_patch.stop)
+        self.claim_patch = patch.object(w.recovery, "claim", side_effect=lambda *args: nullcontext("test-key"))
+        self.claim_patch.start()
+        self.addCleanup(self.claim_patch.stop)
         self.plan = {"schemaVersion": 1, "workflow": "feature", "intervalStart": "2026-01-02T00:00:00Z",
                      "intervalEnd": "2026-01-03T00:00:00Z", "outputVersion": "test-v1", "sourceRevision": "3",
                      "transform": self.ref, "profiles": self.ref}
@@ -68,7 +75,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(len(result["results"]["heavyInputs"]), 3)
         self.assertEqual(w.digest(result["results"]["heavyInputs"][0]), plan["history"][0]["heavy"]["csv"]["sha256"])
         self.assertFalse(result["automaticPromotion"])
-        with self.assertRaises(FileExistsError): w.execute(ref, "restore", previous)
+        self.assertEqual(w.read(w.execute(ref, "restore", previous)), result)
 
     def test_backfill_rejects_missing_mutated_or_wrong_historical_inputs(self):
         plan = self.backfill()
@@ -114,7 +121,10 @@ class WorkflowTest(unittest.TestCase):
         path.write_text(json.dumps(self.plan))
         ref = w.reference(path)
         receipt = w.execute(ref, "validate")
-        with self.assertRaises(FileExistsError): w.execute(ref, "validate")
+        self.assertEqual(w.execute(ref, "validate"), receipt)
+        relocated = self.root / "same-plan-new-trigger.json"
+        w.save(relocated, self.plan)
+        self.assertEqual(w.execute(w.reference(relocated), "validate"), receipt)
         changed = copy.deepcopy(self.plan)
         changed["outputVersion"] = "different"
         other = self.root / "other.json"
@@ -129,6 +139,51 @@ class WorkflowTest(unittest.TestCase):
     def test_tracking_outage_does_not_claim_success(self):
         with patch.dict("os.environ", {"PYMK_WORKFLOW_TRACKING_URI": ""}), self.assertRaises(ValueError):
             w.cli("train_light_ranker", [], self.root, tracked=True)
+
+    def test_approved_activation_is_disabled_and_manifest_epoch_bound(self):
+        release = self.root / "release.json"
+        w.save(release, {"schemaVersion": 2, "releaseId": "approved"})
+        approval = self.root / "approval.json"
+        w.save(approval, {"expectedEpoch": 5, "manifestSha256": w.digest(release),
+            "approvedAt": "2026-01-02T00:00:00Z", "expiresAt": "2026-01-04T00:00:00Z"})
+        plan = {key: self.plan[key] for key in ("schemaVersion", "intervalStart", "intervalEnd", "outputVersion", "sourceRevision")}
+        plan.update(workflow="approved_activation", release=w.reference(release), approval=w.reference(approval),
+                    expectedEpoch=5, legacyModel=self.ref, legacyMetadata=self.ref, operatorDrainConfirmed=True)
+        now = w.instant("2026-01-03T12:00:00Z")
+        with patch.dict("os.environ", {"PYMK_WORKFLOW_ALLOW_ACTIVATION": "false"}), self.assertRaisesRegex(ValueError, "disabled"):
+            w.validate(plan, now)
+        with patch.dict("os.environ", {"PYMK_WORKFLOW_ALLOW_ACTIVATION": "true"}):
+            self.assertEqual(w.validate(plan, now), plan)
+            with self.assertRaisesRegex(ValueError, "epoch"): w.validate({**plan, "expectedEpoch": 6}, now)
+            with self.assertRaisesRegex(ValueError, "drained"): w.validate({**plan, "operatorDrainConfirmed": False}, now)
+            with self.assertRaisesRegex(ValueError, "Expired"): w.validate(plan, w.instant("2026-01-05T00:00:00Z"))
+
+    def test_command_reuses_verified_receipt_and_blocks_corruption(self):
+        output = self.root / "output.json"
+        log = self.root / "command.log"
+        def write_output(*args, **kwargs): output.write_text("completed")
+        with patch("subprocess.run", side_effect=write_output) as run:
+            w.command(["fixed-worker"], log)
+            w.command(["fixed-worker"], log)
+            self.assertEqual(run.call_count, 1)
+        with self.assertRaisesRegex(ValueError, "identity"): w.command(["different-worker"], log)
+        output.write_text("corrupt")
+        with self.assertRaisesRegex(ValueError, "checksum"): w.command(["fixed-worker"], log)
+
+    def test_uncertain_partial_command_is_not_blindly_reexecuted(self):
+        log = self.root / "partial.log"
+        log.write_text("worker crashed")
+        with patch("subprocess.run") as run, self.assertRaisesRegex(ValueError, "Uncertain"):
+            w.command(["fixed-worker"], log)
+        run.assert_not_called()
+
+    def test_actual_timeout_leaves_no_success_receipt(self):
+        log = self.root / "timeout.log"
+        with self.assertRaises(subprocess.TimeoutExpired):
+            w.command([sys.executable, "-c", "import time; time.sleep(5)"], log, timeout=0.1)
+        self.assertFalse(log.with_suffix(".completed.json").exists())
+        with self.assertRaisesRegex(ValueError, "Uncertain"):
+            w.command([sys.executable, "-c", "print('must not run')"], log)
 
     def test_blend_context_is_not_sent_as_full_funnel_evaluation_context(self):
         plan = self.candidate()

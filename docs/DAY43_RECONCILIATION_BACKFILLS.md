@@ -1,5 +1,8 @@
 # Day 43 — reconciliation and reproducible backfills
 
+This is the Day 43 acceptance record. For the subsequent durable identity ledger,
+bounded retries and acknowledgement recovery, see the [Day 44 runbook](DAY44_WORKFLOW_RECOVERY.md).
+
 ## Runtime boundaries
 
 `pymk_live_reconciliation` runs daily at 03:00 UTC (or manually). It invokes the

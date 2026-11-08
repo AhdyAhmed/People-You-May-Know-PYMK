@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import recovery
 
 ROOT = Path(os.environ.get("PYMK_WORKFLOW_ROOT", "/opt/airflow/artifacts"))
 PYTHON = "/opt/pymk/trainer/bin/python"
@@ -15,7 +16,9 @@ JAR = "/opt/pymk/pymk-batch.jar"
 STEPS = {"feature": ("validate", "embeddings", "stage"),
          "candidate": ("validate", "export", "light", "heavy", "evaluate", "blend", "prepare"),
          "reconcile": ("validate", "reconcile"),
-         "backfill": ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare")}
+         "backfill": ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare"),
+         "release_sync": ("validate", "sync", "stage"),
+         "approved_activation": ("validate", "activate")}
 
 
 def require(condition, message):
@@ -74,7 +77,11 @@ def validate(plan, now=None):
     kind = plan.get("workflow")
     require(kind in STEPS and plan.get("schemaVersion") == 1, "Unknown workflow/schema")
     common = {"schemaVersion", "workflow", "intervalStart", "intervalEnd", "outputVersion", "sourceRevision", "transform"}
-    if kind == "reconcile":
+    if kind in ("release_sync", "approved_activation"):
+        common -= {"transform"}
+        specific = {"release"} if kind == "release_sync" else {
+            "release", "approval", "expectedEpoch", "legacyModel", "legacyMetadata", "operatorDrainConfirmed"}
+    elif kind == "reconcile":
         common -= {"transform", "sourceRevision"}
         specific = {"windowStart", "knowledgeCutoff"}
     else:
@@ -91,6 +98,22 @@ def validate(plan, now=None):
         require(end <= instant(plan["knowledgeCutoff"]) <= now, "Invalid ingestion watermark")
         return plan
     require(isinstance(plan["sourceRevision"], str) and re.fullmatch(r"[0-9]+", plan["sourceRevision"]), "Explicit source revision required")
+    if kind in ("release_sync", "approved_activation"):
+        release = read(plan["release"])
+        require(release.get("schemaVersion") == 2, "Pinned registry release required")
+        if kind == "approved_activation":
+            require(os.environ.get("PYMK_WORKFLOW_ALLOW_ACTIVATION") == "true", "Operator activation is disabled")
+            require(plan["operatorDrainConfirmed"] is True, "Explicit drained deployment confirmation required")
+            require(type(plan["expectedEpoch"]) is int and plan["expectedEpoch"] >= 0, "Expected epoch required")
+            approval_path = resolve(plan["approval"])
+            require(approval_path == resolve(plan["release"]).parent / "approval.json", "Approval must belong to synchronized stage")
+            approval = read(plan["approval"])
+            require(approval["expectedEpoch"] == plan["expectedEpoch"]
+                    and approval["manifestSha256"] == plan["release"]["sha256"], "Approval manifest/epoch mismatch")
+            require(instant(approval["approvedAt"]) <= now < instant(approval["expiresAt"]), "Expired or future approval")
+            resolve(plan["legacyModel"])
+            resolve(plan["legacyMetadata"])
+        return plan
     transform = read(plan["transform"])
     # The actual transform loader validates the complete schema during computation.
     cutoff = instant(transform["payload"]["metadata"]["fitCutoff"].replace("+00:00", "Z"))
@@ -155,11 +178,21 @@ def save(path, document):
         if temporary is not None: temporary.unlink(missing_ok=True)
 
 
-def command(args, log, timeout=1200):
+def command(args, log, timeout=1200, recover=False, artifact_root=None):
     # No shell, credential arguments, detached workers or success inferred from launch.
-    with log.open("x", encoding="utf-8") as stream:
+    marker = log.with_suffix(".completed.json")
+    identity = recovery.key([str(x) for x in args])
+    if marker.exists():
+        completed = json.loads(marker.read_text())
+        require(completed["commandSha256"] == identity, "Command identity changed")
+        for ref in completed["artifacts"]: resolve(ref)
+        return
+    require(recover or not log.exists(), "Uncertain partial command; inspect retained outputs before recovery")
+    with log.open("a", encoding="utf-8") as stream:
         subprocess.run([str(x) for x in args], stdout=stream, stderr=subprocess.STDOUT,
-                       check=True, timeout=timeout)
+                       check=True, timeout=timeout, **({"pass_fds": recovery.INHERITED_FDS} if os.name != "nt" else {}))
+    save(marker, {"commandSha256": identity, "artifacts": [reference(p) for p in sorted((artifact_root or log.parent).rglob("*"))
+        if p.is_file() and p.suffix != ".log" and p.name != "registry-state.json"]})
 
 
 def cli(module, args, directory, tracked=False):
@@ -167,7 +200,34 @@ def cli(module, args, directory, tracked=False):
         uri = os.environ.get("PYMK_WORKFLOW_TRACKING_URI", "")
         require(bool(uri), "Tracked workflows require an injected MLflow URI")
         args = args + ["--tracking-dir", directory / "tracking", "--tracking-uri", uri]
-    command([PYTHON, "-m", "pymk_training." + module, *args], directory / (module + ".log"))
+    invocation = directory / (module + "-invocation.json")
+    spec = {"commandSha256": recovery.key([module, *[str(x) for x in args]])}
+    ensure_saved(invocation, spec)
+    bundles = list((directory / "tracking").glob("*/*/state.json")) if tracked else []
+    if bundles:
+        require(len(bundles) == 1, "Ambiguous tracked computation; manual reconciliation required")
+        bundle = bundles[0].parent
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        require(manifest["exitCode"] == 0, "Incomplete/failed computation cannot be retrained into existing outputs")
+        # M7 validates local input/output checksums and resumes publication without recomputation.
+        command([PYTHON, "-m", "pymk_training.tracking", "--bundle", bundle, "--tracking-uri", uri],
+                directory / "tracking-recovery.log", recover=True)
+    elif module in ("model_sync", "registry") and "--output-dir" in args and (directory / (module + ".log")).exists():
+        output = confined(args[args.index("--output-dir") + 1])
+        if module == "model_sync":
+            proof = json.loads((output / "sync.json").read_text())
+            require(proof["sourceManifestSha256"] == digest(args[args.index("--release") + 1]), "Synchronized source changed")
+        else:
+            proof = json.loads((output / "candidate.json").read_text())
+            state = json.loads((output / "registry-state.json").read_text())
+            require(recovery.key(proof) == state["candidateSha256"], "Prepared candidate changed")
+        require(proof["javaVerifierSha256"] == digest(JAR), "Completion verifier changed")
+        for name, expected in proof["files"].items():
+            artifact = confined(output / name)
+            require(artifact.is_relative_to(output) and digest(artifact) == expected, "Completion artifact changed")
+    else:
+        command([PYTHON, "-m", "pymk_training." + module, *args], directory / (module + ".log"),
+                artifact_root=directory.parent if module == "registry" else directory)
     if tracked:
         bundles = list((directory / "tracking").glob("*/*/state.json"))
         require(len(bundles) == 1, "Expected one tracked computation")
@@ -179,13 +239,33 @@ def cli(module, args, directory, tracked=False):
 def batch(plan, job, parameters, directory, label):
     request = directory / (label + "-request.json")
     receipt = directory / (label + "-receipt.json")
-    save(request, {"job": job, "parameters": {k: str(v) for k, v in parameters.items()}, "sourceRevision": plan.get("sourceRevision")})
+    ensure_saved(request, {"job": job, "parameters": {k: str(v) for k, v in parameters.items()},
+                          "sourceRevision": plan.get("sourceRevision"),
+                          "approvedActivation": plan["workflow"] == "approved_activation"})
     command(["java", "-Dloader.main=com.ahdyahmed.pymk.batch.WorkflowBatchRunner", "-cp", JAR,
-             "org.springframework.boot.loader.launch.PropertiesLauncher", request, receipt], directory / (label + ".log"))
+             "org.springframework.boot.loader.launch.PropertiesLauncher", request, receipt], directory / (label + ".log"), recover=True)
     require(json.loads(receipt.read_text())["status"] == "COMPLETED", "Missing completed batch receipt")
 
 
+def ensure_saved(path, document):
+    if path.exists():
+        require(json.loads(path.read_text()) == document, "Existing immutable identity changed")
+    else:
+        save(path, document)
+
+
 def execute(plan_ref, step, previous=None):
+    plan = validate(read(plan_ref))
+    require(step in STEPS[plan["workflow"]], "Unsupported workflow step")
+    identity = {"plan": plan, "step": step, "predecessor": previous,
+                "workerSha256": digest(__file__), "recoverySha256": digest(recovery.__file__), "javaSha256": digest(JAR),
+                "trackingDestination": recovery.key(os.environ.get("PYMK_WORKFLOW_TRACKING_URI", "")),
+                "trainerRequirements": digest("/opt/pymk/trainer-requirements.txt") if Path("/opt/pymk/trainer-requirements.txt").exists() else None}
+    with recovery.claim(ROOT, plan["outputVersion"], step, identity):
+        return execute_owned(plan_ref, step, previous)
+
+
+def execute_owned(plan_ref, step, previous=None):
     plan = validate(read(plan_ref))
     sequence = STEPS[plan["workflow"]]
     require(step in sequence, "Unsupported workflow step")
@@ -193,18 +273,37 @@ def execute(plan_ref, step, previous=None):
     work = confined(ROOT / "workflows" / plan["outputVersion"])
     if index:
         prior = read(previous)
-        require(prior["plan"] == plan_ref and prior["step"] == sequence[index-1], "Incorrect predecessor or changed plan")
+        require(read(prior["plan"]) == plan and prior["step"] == sequence[index-1], "Incorrect predecessor or changed plan")
         for ref in prior["artifacts"]:
             resolve(ref)
     else:
         require(previous is None, "Validation must not take a predecessor")
         prior = {"artifacts": [], "results": {}}
     directory = work / step
-    directory.mkdir(parents=True, exist_ok=False)  # fail closed on partial/repeated work; Day 44 adds recovery
+    directory.mkdir(parents=True, exist_ok=True)
+    completed = directory / "result.json"
+    if completed.exists():
+        result = json.loads(completed.read_text())
+        require(read(result["plan"]) == plan and result["step"] == step, "Completed work identity changed")
+        for ref in result["artifacts"]: resolve(ref)
+        return reference(completed)
     results = dict(prior["results"])
     transform = resolve(plan["transform"]) if "transform" in plan else None
     version = plan["outputVersion"]
-    if step == "reconcile":
+    if step == "sync":
+        uri = os.environ.get("PYMK_WORKFLOW_TRACKING_URI", "")
+        require(bool(uri), "Tracking URI required for pinned synchronization")
+        cli("model_sync", ["--release", resolve(plan["release"]), "--output-dir", directory / "bundle",
+            "--tracking-uri", uri, "--java-verifier-jar", JAR], directory)
+        results["manifest"] = str(directory / "bundle/release.json")
+        require((directory / "bundle/sync.json").is_file(), "Incomplete synchronization")
+    elif step == "activate":
+        manifest = read(plan["release"])
+        batch(plan, "servingReleaseJob", {"action": "activate-approved", "releaseId": manifest["releaseId"],
+            "stagePath": resolve(plan["release"]).parent, "expectedEpoch": plan["expectedEpoch"],
+            "legacyModelPath": resolve(plan["legacyModel"]), "legacyMetadataPath": resolve(plan["legacyMetadata"])}, directory, "activate")
+        results["operatorApprovedActivation"] = True
+    elif step == "reconcile":
         batch(plan, "liveFeatureReconciliationJob", {"windowStart": plan["windowStart"],
             "windowEnd": plan["intervalEnd"], "knowledgeCutoff": plan["knowledgeCutoff"],
             "runId": version}, directory, "reconcile")
@@ -214,9 +313,12 @@ def execute(plan_ref, step, previous=None):
         for i, item in enumerate(plan["history"]):
             for name in ("light", "heavy"):
                 output = directory / f"{name}-{i}.csv"
-                with output.open("xb") as stream:
-                    stream.write(resolve(item[name]["csv"]).read_bytes())
-                save(Path(str(output) + ".provenance.json"), read(item[name]["provenance"]))
+                if output.exists():
+                    require(digest(output) == item[name]["csv"]["sha256"], "Partial restore checksum mismatch")
+                else:
+                    with output.open("xb") as stream:
+                        stream.write(resolve(item[name]["csv"]).read_bytes())
+                ensure_saved(Path(str(output) + ".provenance.json"), read(item[name]["provenance"]))
                 results[name + "Inputs"].append(str(output))
     elif step == "embeddings":
         vectors, manifest = directory / "vectors.csv", directory / "release.json"
@@ -266,7 +368,7 @@ def execute(plan_ref, step, previous=None):
     elif step == "prepare":
         for kind in ("light", "heavy"):
             logs = directory / (kind + "-logs")
-            logs.mkdir()
+            logs.mkdir(exist_ok=True)
             cli("registry", ["prepare", "--bundle", results[kind + "Bundle"], "--output-dir", directory / kind,
                 "--java-verifier-jar", JAR, "--lineage-bundle", results["evaluateBundle"],
                 "--lineage-bundle", results["blendBundle"]], logs)
@@ -277,7 +379,7 @@ def execute(plan_ref, step, previous=None):
     validate(read(plan_ref))  # Detect input mutation during the worker, too.
     for ref in prior["artifacts"]:
         resolve(ref)
-    artifacts = prior["artifacts"] + [reference(p) for p in sorted(directory.rglob("*")) if p.is_file() and p.suffix != ".log"]
+    artifacts = prior["artifacts"] + [reference(p) for p in sorted(directory.rglob("*")) if p.is_file() and p.suffix != ".log" and p.name != "registry-state.json"]
     receipt = directory / "result.json"
     save(receipt, {"schemaVersion": 1, "plan": plan_ref, "step": step, "artifacts": artifacts,
                    "results": results, "automaticPromotion": False})

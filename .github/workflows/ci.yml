@@ -86,6 +86,6 @@ jobs:
       - name: Verify isolated Airflow contracts, scheduler execution and persistence
         shell: pwsh
         run: ./scripts/day41-airflow-smoke.ps1
-      - name: Verify managed feature and mature tracked model workflows
+      - name: Verify managed workflows, durable recovery and controlled release boundaries
         shell: pwsh
-        run: ./scripts/day42-airflow-workflows-smoke.ps1 -IncludeDay43
+        run: ./scripts/day42-airflow-workflows-smoke.ps1 -IncludeDay44

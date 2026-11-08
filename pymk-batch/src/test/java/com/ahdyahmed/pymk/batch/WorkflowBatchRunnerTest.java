@@ -21,6 +21,10 @@ class WorkflowBatchRunnerTest {
         rejects("{\"job\":\"embeddingRefreshJob\",\"sourceRevision\":\"current\"}", "source revision");
     }
 
+    @Test void approvedActivationRequiresExplicitRequestIntentEvenIfEnvironmentEnabled() throws Exception {
+        rejects("{\"job\":\"servingReleaseJob\",\"approvedActivation\":false,\"parameters\":{\"action\":\"activate-approved\"}}", "immutable exports");
+    }
+
     private void rejects(String json, String message) throws Exception {
         Path request = directory.resolve("request.json");
         Files.writeString(request, json);

@@ -1,5 +1,9 @@
 # Day 42 — scheduled managed features and model candidates
 
+This is the Day 42 acceptance record. The [Day 44 recovery runbook](DAY44_WORKFLOW_RECOVERY.md)
+supersedes its zero-retry and existing-destination rejection rules with bounded,
+identity-checked recovery; the original acceptance evidence below remains historical.
+
 Two real Airflow DAGs invoke the shipped Java 21 batch JAR and isolated Python
 trainer environment. Both are paused at creation and use explicit UTC data
 interval timetables, `catchup=False`, one active run/task and the shared single-slot

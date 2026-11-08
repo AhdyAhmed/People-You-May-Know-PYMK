@@ -16,7 +16,7 @@ public class StatusController {
         return Map.of(
                 "service", "pymk-api",
                 "status", "up",
-                "milestone", "M8 - Day 43: Reconciliation and reproducible backfills",
+                "milestone", "M8 - Day 44: Durable workflow recovery and controlled releases",
                 "scorer", pipeline.mode()
         );
     }

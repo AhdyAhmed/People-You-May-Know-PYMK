@@ -45,6 +45,9 @@ def main():
     for name in ("profiles.csv", "evaluation-policy.json", "blend-policy.json"):
         shutil.copyfile(Path("/opt/pymk/fixtures") / name, base / name)
     w.command(["java", "-jar", w.JAR, "--spring.batch.job.enabled=false"], base / "migrate.log")
+    if "--day44" in sys.argv:
+        from recovery_smoke import preflight
+        preflight()
     sql("""INSERT INTO members(id,full_name,headline,company,school,geo_region,created_at) VALUES
         (1,'Engineer 1','Java backend engineer distributed systems','Acme','Engineering University','Cairo','2026-01-01'),
         (2,'Engineer 2','Java backend engineer distributed systems','Acme','Engineering University','Cairo','2026-01-01'),
@@ -103,8 +106,11 @@ def main():
     assert sql("SELECT release_id,manifest_sha256,state FROM pymk_serving_releases WHERE release_id LIKE 'history-%' ORDER BY release_id") == retained
     assert sql("SELECT state FROM pymk_serving_releases WHERE release_id='fresh-generation'")[0][0] == "STAGED"
     print("PASS: managed generations retained; failed refresh isolated; mature tracked L1/L2, evaluation, blend and Java-validated candidates; no activation", flush=True)
-    if "--day43" in sys.argv:
+    if "--day43" in sys.argv or "--day44" in sys.argv:
         day43(token, plan)
+    if "--day44" in sys.argv:
+        from recovery_smoke import run
+        run(token)
 
 
 def day43(token, candidate_plan):

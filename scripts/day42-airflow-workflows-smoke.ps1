@@ -1,4 +1,4 @@
-param([switch]$SkipBuild, [switch]$IncludeDay43)
+param([switch]$SkipBuild, [switch]$IncludeDay43, [switch]$IncludeDay44)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 $run = [guid]::NewGuid().ToString('N').Substring(0,10)
@@ -7,7 +7,7 @@ $output = (New-Item -ItemType Directory -Path "$root/artifacts/day42-smoke/$run"
 $variables = @('PYMK_AIRFLOW_DB_PASSWORD','PYMK_AIRFLOW_ADMIN_PASSWORD','PYMK_AIRFLOW_UI_PASSWORD',
     'PYMK_AIRFLOW_JWT_SECRET','PYMK_AIRFLOW_FERNET_KEY','PYMK_AIRFLOW_PORT','COMPOSE_PROFILES',
     'PYMK_MLFLOW_DB_PASSWORD','PYMK_MLFLOW_ADMIN_PASSWORD','PYMK_MLFLOW_PORT',
-    'PYMK_WORKFLOW_DB_PASSWORD','PYMK_WORKFLOW_DB_USER','PYMK_WORKFLOW_JDBC_URL')
+    'PYMK_WORKFLOW_DB_PASSWORD','PYMK_WORKFLOW_DB_USER','PYMK_WORKFLOW_JDBC_URL','PYMK_WORKFLOW_ALLOW_ACTIVATION')
 $previous = @{}
 foreach ($name in $variables) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 foreach ($name in @('PYMK_AIRFLOW_DB_PASSWORD','PYMK_AIRFLOW_ADMIN_PASSWORD','PYMK_AIRFLOW_UI_PASSWORD',
@@ -17,6 +17,7 @@ foreach ($name in @('PYMK_AIRFLOW_DB_PASSWORD','PYMK_AIRFLOW_ADMIN_PASSWORD','PY
 $env:PYMK_AIRFLOW_FERNET_KEY = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).Replace('+','-').Replace('/','_')
 $env:PYMK_WORKFLOW_DB_USER = 'pymk'
 $env:PYMK_WORKFLOW_JDBC_URL = 'jdbc:postgresql://workflow-postgres:5432/pymk'
+$env:PYMK_WORKFLOW_ALLOW_ACTIVATION = 'false'
 $env:COMPOSE_PROFILES = $null
 function FreePort {
     $socket = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -37,10 +38,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Offline tests failed: $output/contracts.log" }
     Compose @('up','-d','--wait','--wait-timeout','240','workflow-postgres','mlflow','airflow-api','airflow-scheduler','airflow-dag-processor')
     $workerArguments = @('exec','-T','airflow-api','python','/opt/pymk/workflow_smoke.py')
-    if ($IncludeDay43) { $workerArguments += '--day43' }
+    if ($IncludeDay44) { $workerArguments += '--day44' }
+    elseif ($IncludeDay43) { $workerArguments += '--day43' }
     Compose $workerArguments
+    if ($IncludeDay44) {
+        Compose @('restart','airflow-scheduler')
+        Compose @('up','-d','--wait','--wait-timeout','120','airflow-scheduler')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/recovery_smoke.py')
+    }
     Compose @('exec','-T','airflow-api','python','/opt/pymk/smoke.py','run')
-    $scope = if ($IncludeDay43) { 'Days 41-43 workflows, reconciliation and historical backfills' } else { 'Day 42 scheduled workflows and Day 41 regression' }
+    $scope = if ($IncludeDay44) { 'Days 41-44 workflows and recovery' } elseif ($IncludeDay43) { 'Days 41-43 workflows, reconciliation and historical backfills' } else { 'Day 42 scheduled workflows and Day 41 regression' }
     Write-Host "PASS: $scope. Evidence: $output"
 } finally {
     if ($project -notmatch '^pymk-day42-[a-f0-9]{10}$') { throw 'Unsafe cleanup target' }

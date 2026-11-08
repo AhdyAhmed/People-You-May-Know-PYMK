@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 43 complete (M1–M7 complete; M8 in progress).
+**Current checkpoint:** Day 44 complete (M1–M7 complete; M8 in progress).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Days 36–40 deliver the MLflow lifecycle. Days 41–43 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules, mature tracked model-candidate workflows, finite reconciliation and retained-export backfills. Day 44 retry/restart identities and controlled release workflows are next.
+Days 36–40 deliver the MLflow lifecycle. Days 41–44 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules, mature tracked model-candidate workflows, finite reconciliation, retained-export backfills, durable retry identities and controlled release workflows. Day 45 end-to-end orchestration resilience is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow lifecycle, Airflow schedules, reconciliation and retained-export backfills are implemented; durable recovery and orchestration resilience remain Days 44–45.
+release (M10). MLflow lifecycle, Airflow schedules, reconciliation, retained-export backfills and durable recovery are implemented; expanded orchestration resilience remains Day 45.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–43 are the implementation record. Unchecked future days below
+Completed Days 1–44 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–43 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–44 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -396,7 +396,22 @@ PostgreSQL graph adjacency needs no separate index-refresh DAG.
 - Require explicit historical source revisions, feature/knowledge cutoffs, label maturity and destination versions for backfills. Missing historical inputs fail validation; never substitute current profiles or overwrite published datasets. Backfills cannot activate a serving release automatically.
 - Bound normal and backfill concurrency separately, use shared resource pools and database fencing with manual invocations, and test replay convergence without contaminating historical exports. Add graph-index refresh only for the configured store, not an implicit Neo4j dependency.
 
-**Day 44 — Retry/restart identities + controlled release workflow**
+**Day 44 — Retry/restart identities + controlled release workflow ✅**
+
+Implemented and verified 2026-10-17. The [Day 44 runbook](DAY44_WORKFLOW_RECOVERY.md)
+defines the shipped recovery boundaries, manual release manifests and verification procedure.
+Flyway V13 owns the work ledger; PostgreSQL locks and inherited Linux file locks
+fence workers. Completed Batch executions and retained MLflow bundles are reused,
+not recreated. Manual synchronization/staging and explicitly enabled M7-approved
+activation are separate DAGs. Unknown partial work remains blocked for operator
+inspection; multi-host recovery and exactly-once remote registration are not claimed.
+
+Acceptance: full reactor **280 Java tests**, **106 Python tests**, **24 packaged
+Airflow tests**, all passing. Live Days 41–44 smoke passed: real model workflows,
+lost Batch acknowledgement, surviving-child fencing, pinned synchronization,
+disabled activation, conflicting inputs, and unchanged Batch/MLflow identities
+before/after scheduler restart. Evidence and interrupted-run accounting are in
+the runbook. Full packaged approved HTTP activation/rollback remains Day 45.
 
 - Persist the mapping from logical work key (job, interval, source/config hashes and output version) to Spring Batch instance/executions, MLflow run/attempts and output manifest. Airflow task retries must resume or validate/reuse completed work, not create new timestamp-based jobs or overwrite artifacts.
 - Test a worker crash after job completion but before task acknowledgement, scheduler restart, timeout/cancellation and orphan-job reconciliation. Concurrent manual/scheduled work must share database locking/leases; Airflow pools alone are insufficient.

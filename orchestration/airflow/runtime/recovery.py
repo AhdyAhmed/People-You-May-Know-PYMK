@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -53,10 +54,15 @@ def claim(root, version, step, identity):
             row = cursor.fetchone()
             if row and row != (logical, str(Path(root).resolve())):
                 raise ValueError("Destination already bound to different inputs, runtime or artifact root")
-            cursor.execute("""INSERT INTO pymk_workflow_work(output_version,step,logical_key,artifact_root,state)
-                VALUES (%s,%s,%s,%s,'RUNNING') ON CONFLICT (output_version,step) DO UPDATE
-                SET state='RUNNING',attempts=pymk_workflow_work.attempts+1,updated_at=clock_timestamp()""",
-                (version, step, logical, str(Path(root).resolve())))
+            plan = identity.get("plan", {})
+            cursor.execute("""INSERT INTO pymk_workflow_work
+                (output_version,step,logical_key,artifact_root,state,workflow,interval_end,started_at)
+                VALUES (%s,%s,%s,%s,'RUNNING',%s,%s,clock_timestamp())
+                ON CONFLICT (output_version,step) DO UPDATE SET state='RUNNING',
+                attempts=pymk_workflow_work.attempts+1,updated_at=clock_timestamp(),started_at=clock_timestamp(),
+                workflow=EXCLUDED.workflow,interval_end=EXCLUDED.interval_end""",
+                (version, step, logical, str(Path(root).resolve()), plan.get("workflow"), plan.get("intervalEnd")))
+            started = time.monotonic()
             INHERITED_FDS = (file.fileno(),)
             try:
                 yield logical
@@ -64,11 +70,13 @@ def claim(root, version, step, identity):
                 receipt = directory / "result.json"
                 if not receipt.is_file(): raise ValueError("Missing completed work receipt")
                 evidence["result"] = {"path": str(receipt), "sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()}
-                cursor.execute("UPDATE pymk_workflow_work SET state='COMPLETED',evidence=%s::jsonb,updated_at=clock_timestamp() WHERE logical_key=%s",
-                               (json.dumps(evidence), logical))
+                cursor.execute("""UPDATE pymk_workflow_work SET state='COMPLETED',evidence=%s::jsonb,
+                    updated_at=clock_timestamp(),completed_at=clock_timestamp(),last_duration_seconds=%s WHERE logical_key=%s""",
+                               (json.dumps(evidence), time.monotonic()-started, logical))
             except BaseException:
-                cursor.execute("UPDATE pymk_workflow_work SET state='BLOCKED',evidence=%s::jsonb,updated_at=clock_timestamp() WHERE logical_key=%s",
-                               (json.dumps(observations(directory)), logical))
+                cursor.execute("""UPDATE pymk_workflow_work SET state='BLOCKED',evidence=%s::jsonb,
+                    updated_at=clock_timestamp(),failure_count=failure_count+1,last_duration_seconds=%s WHERE logical_key=%s""",
+                               (json.dumps(observations(directory)), time.monotonic()-started, logical))
                 raise
             finally:
                 INHERITED_FDS = ()

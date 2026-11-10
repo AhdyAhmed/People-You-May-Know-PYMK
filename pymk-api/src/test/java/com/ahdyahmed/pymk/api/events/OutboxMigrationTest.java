@@ -33,6 +33,7 @@ class OutboxMigrationTest {
                     """);
             assertThat(Flyway.configure().dataSource(source).target("11").load().migrate().migrationsExecuted).isEqualTo(1);
             assertThat(Flyway.configure().dataSource(source).target("12").load().migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(Flyway.configure().dataSource(source).target("13").load().migrate().migrationsExecuted).isEqualTo(1);
             var flyway = Flyway.configure().dataSource(source).load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();

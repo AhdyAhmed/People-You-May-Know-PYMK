@@ -17,6 +17,7 @@ COPY --chown=airflow:0 pymk-ml-training/src /opt/pymk/training/src
 RUN /opt/pymk/trainer/bin/pip install --no-cache-dir --no-deps /opt/pymk/training \
     && /opt/pymk/trainer/bin/pip check
 COPY --chown=airflow:0 pymk-batch/target/pymk-batch.jar /opt/pymk/pymk-batch.jar
+COPY --chown=airflow:0 pymk-api/target/pymk-api.jar /opt/pymk/pymk-api.jar
 COPY --chown=airflow:0 pymk-batch/src/test/resources/day23/model.base64 /opt/pymk/model.base64
 COPY --chown=airflow:0 orchestration/airflow/runtime /opt/pymk/
 COPY --chown=airflow:0 orchestration/airflow/dags /opt/airflow/dags

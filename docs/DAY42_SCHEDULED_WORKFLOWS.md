@@ -32,7 +32,7 @@ through `PYMK_WORKFLOW_DB_PASSWORD`; optional `PYMK_WORKFLOW_DB_USER` and
 `PYMK_MLFLOW_DB_PASSWORD` and `PYMK_MLFLOW_ADMIN_PASSWORD`.
 
 ```powershell
-mvn -B -ntp -pl pymk-batch -am -DskipTests package
+mvn -B -ntp -pl pymk-api,pymk-batch -am -DskipTests package
 docker compose -f infra/docker-compose.yml -f infra/airflow-workflows.yml --profile airflow --profile mlflow build airflow-api mlflow
 docker compose -f infra/docker-compose.yml -f infra/airflow-workflows.yml --profile airflow --profile mlflow up -d --wait mlflow airflow-api airflow-scheduler airflow-dag-processor
 ```

@@ -47,6 +47,16 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(w.validate(self.plan), self.plan)
         self.assertEqual(w.validate(self.candidate())["workflow"], "candidate")
 
+    def test_offline_report_requires_frozen_history_and_pinned_models(self):
+        plan = self.backfill()
+        plan.update(workflow="offline_report", heavyModel=self.ref, heavyMetadata=self.ref,
+                    lightModel=self.ref, lightMetadata=self.ref)
+        del plan["blendPolicy"], plan["context"]
+        self.assertEqual(w.validate(plan), plan)
+        with self.assertRaises(ValueError):
+            w.validate({**plan, "heavyModel": {**self.ref, "sha256": "0"*64}})
+        self.assertEqual(w.STEPS["offline_report"], ("validate", "restore", "evaluate"))
+
     def backfill(self):
         plan = self.candidate()
         plan["workflow"] = "backfill"

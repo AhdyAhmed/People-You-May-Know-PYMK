@@ -18,6 +18,11 @@ pymk-batch/**
 !pymk-batch/target/
 pymk-batch/target/**
 !pymk-batch/target/pymk-batch.jar
+!pymk-api/
+pymk-api/**
+!pymk-api/target/
+pymk-api/target/**
+!pymk-api/target/pymk-api.jar
 !pymk-batch/src/
 pymk-batch/src/**
 !pymk-batch/src/test/

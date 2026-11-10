@@ -82,10 +82,10 @@ jobs:
           java-version: "21"
           cache: maven
       - name: Package worker Java runtime
-        run: mvn -B -ntp -pl pymk-batch -am -DskipTests package
+        run: mvn -B -ntp -pl pymk-api,pymk-batch -am -DskipTests package
       - name: Verify isolated Airflow contracts, scheduler execution and persistence
         shell: pwsh
         run: ./scripts/day41-airflow-smoke.ps1
       - name: Verify managed workflows, durable recovery and controlled release boundaries
         shell: pwsh
-        run: ./scripts/day42-airflow-workflows-smoke.ps1 -IncludeDay44
+        run: ./scripts/day42-airflow-workflows-smoke.ps1 -IncludeDay45

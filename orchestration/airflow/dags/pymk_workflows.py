@@ -53,5 +53,6 @@ feature_dag = make_dag("pymk_feature_refresh", "feature", "0 2 * * *", ("validat
 candidate_dag = make_dag("pymk_model_candidate", "candidate", "0 4 * * 0", ("validate", "export", "light", "heavy", "evaluate", "blend", "prepare"))
 reconciliation_dag = make_dag("pymk_live_reconciliation", "reconcile", "0 3 * * *", ("validate", "reconcile"))
 backfill_dag = make_dag("pymk_historical_backfill", "backfill", None, ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare"))
-sync_dag = make_dag("pymk_release_sync", "release_sync", None, ("validate", "sync", "stage"))
+sync_dag = make_dag("pymk_release_sync", "release_sync", "0 5 * * *", ("validate", "sync", "stage"))
+report_dag = make_dag("pymk_offline_report", "offline_report", "0 6 * * 1", ("validate", "restore", "evaluate"))
 activation_dag = make_dag("pymk_approved_activation", "approved_activation", None, ("validate", "activate"))

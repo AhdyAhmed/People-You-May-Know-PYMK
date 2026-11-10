@@ -4,15 +4,15 @@ Companion to `PYMK_DESIGN.md`. The first 30 focused workdays deliver M1–M5;
 M6–M10 are explicit post-Day-30 extensions. The schedule assumes roughly 1–2
 focused hours per day, but completion is evidence-based rather than calendar-based.
 
-**Current checkpoint:** Day 44 complete (M1–M7 complete; M8 in progress).
+**Current checkpoint:** Day 45 complete (M1–M8 complete; M9 next).
 Durable ingestion/outbox, idempotent consumers, DLT recovery, live event windows,
 targeted cache epochs and finite reconciliation are implemented and verified.
 Day 35 Kafka resilience and observability are implemented and verified.
-Days 36–40 deliver the MLflow lifecycle. Days 41–44 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules, mature tracked model-candidate workflows, finite reconciliation, retained-export backfills, durable retry identities and controlled release workflows. Day 45 end-to-end orchestration resilience is next.
+Days 36–40 deliver the MLflow lifecycle. Days 41–45 add isolated Airflow infrastructure, a tested runtime-contract DAG, managed feature schedules, mature tracked model-candidate workflows, finite reconciliation, retained-export backfills, durable retry identities, controlled release workflows and verified orchestration resilience. M9 unified observability is next.
 
 **Planned sequence:** Kafka (M6, Days 31–35) → MLflow (M7, Days 36–40) →
 Airflow + batch operations (M8, Days 41–45) → observability (M9) → portfolio
-release (M10). MLflow lifecycle, Airflow schedules, reconciliation, retained-export backfills and durable recovery are implemented; expanded orchestration resilience remains Day 45.
+release (M10). MLflow lifecycle, Airflow schedules, reconciliation, retained-export backfills, durable recovery and orchestration resilience are implemented through Day 45.
 This expansion preserves Days 1–30 and Kafka's existing scope; the former M7
 batch-operations work moves into M8, and the former M8/M9 become M9/M10.
 
@@ -21,7 +21,7 @@ tests pass, migrations and entity mappings agree, and user-facing behavior or
 architectural decisions are reflected in the README/design docs. A manual check
 alone does not mark a day complete when the behavior can be automated.
 
-Completed Days 1–44 are the implementation record. Unchecked future days below
+Completed Days 1–45 are the implementation record. Unchecked future days below
 are acceptance criteria, not completed features. The 1–2 hour estimate is a
 planning guide: preserve correctness and move an unfinished deliverable rather
 than marking it complete on schedule. Model/data releases must be reproducible,
@@ -29,7 +29,7 @@ versioned, compatible with serving, and reversible.
 
 ### Dependency and acceptance guide
 
-Days 1–44 are the completed checkpoint. Day 23 supplies the coordinated
+Days 1–45 are the completed checkpoint. Day 23 supplies the coordinated
 embedding/feature/model activation mechanism before live vectors change.
 Day 24 adds release-bound multi-target datasets; Day 25 adds offline heavy training.
 Day 26 adds the opt-in Java heavy scorer; Day 27 adds frozen offline evaluation.
@@ -356,7 +356,7 @@ Runtime Java or the Day 23 serving-release authority. See design section 7.3.
 
 ---
 
-## Week 8 — Airflow Orchestration & Batch Operations (M8, in progress)
+## Week 8 — Airflow Orchestration & Batch Operations (M8, complete)
 
 Airflow schedules bounded workflows after Kafka and MLflow are established.
 Spring Batch still owns chunk transactions/checkpoints and the Python CLIs still
@@ -417,7 +417,17 @@ the runbook. Full packaged approved HTTP activation/rollback remains Day 45.
 - Test a worker crash after job completion but before task acknowledgement, scheduler restart, timeout/cancellation and orphan-job reconciliation. Concurrent manual/scheduled work must share database locking/leases; Airflow pools alone are insufficient.
 - Connect approved candidates to M7 synchronization and expected-epoch activation. Verify approval is bound to exact manifest/epoch, block stale or incomplete candidates, and retain an operator-controlled deployment/rollback boundary for process-level L2/blend changes.
 
-**Day 45 — End-to-end orchestration resilience + runbook**
+**Day 45 — End-to-end orchestration resilience + runbook ✅**
+
+Implemented and verified 2026-10-18: [operator runbook](DAY45_ORCHESTRATION_RESILIENCE.md).
+Scheduled synchronization and pinned offline reports, V14 operational telemetry,
+and conservative request-envelope retention are implemented. The expanded smoke
+tests packaged serving isolation, synthetic approval wiring and metadata restore.
+Acceptance passed: 280 Java tests, 106 Python tests, 28 packaged Airflow tests,
+live Days 41–45 orchestration resilience, MLflow lifecycle restore and packaged
+serving/Kafka outage/restart regression. Approval fixtures are synthetic contract
+evidence, not production quality/load approval. Telemetry measures worker attempts;
+unified scraping, dashboards and notifications remain M9.
 
 - Run a deterministic full DAG on already mature fixtures and a separate fresh-data maturity rejection case; verify actual packaged HTTP recommendations after an approved compatible release and after rollback.
 - Test scheduler/worker/Kafka/MLflow/artifact-store outages, task retries, competing runs, restored metadata and retention cleanup. Prove no duplicate effects, no partially published release, and no serving dependency on Airflow availability.

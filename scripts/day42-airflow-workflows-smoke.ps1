@@ -1,4 +1,5 @@
-param([switch]$SkipBuild, [switch]$IncludeDay43, [switch]$IncludeDay44)
+param([switch]$SkipBuild, [switch]$IncludeDay43, [switch]$IncludeDay44, [switch]$IncludeDay45)
+if ($IncludeDay45) { $IncludeDay44 = $true }
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 $run = [guid]::NewGuid().ToString('N').Substring(0,10)
@@ -28,6 +29,7 @@ $env:PYMK_AIRFLOW_PORT = [string](FreePort)
 $env:PYMK_MLFLOW_PORT = [string](FreePort)
 $compose = @('compose','-p',$project,'-f',"$root/infra/docker-compose.yml",'-f',"$root/infra/airflow-workflows.yml",
     '-f',"$root/infra/airflow-workflows-smoke.yml",'--profile','airflow','--profile','mlflow')
+if ($IncludeDay45) { $compose += @('-f', "$root/infra/airflow-resilience-smoke.yml") }
 function Compose([string[]]$arguments) {
     & docker @compose @arguments
     if ($LASTEXITCODE -ne 0) { throw "Day 42 Docker operation failed: $($arguments[0]); evidence $output" }
@@ -47,7 +49,33 @@ try {
         Compose @('exec','-T','airflow-api','python','/opt/pymk/recovery_smoke.py')
     }
     Compose @('exec','-T','airflow-api','python','/opt/pymk/smoke.py','run')
-    $scope = if ($IncludeDay44) { 'Days 41-44 workflows and recovery' } elseif ($IncludeDay43) { 'Days 41-43 workflows, reconciliation and historical backfills' } else { 'Day 42 scheduled workflows and Day 41 regression' }
+    if ($IncludeDay45) {
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','prepare')
+        $env:PYMK_WORKFLOW_ALLOW_ACTIVATION = 'true'
+        Compose @('up','-d','--wait','--wait-timeout','240','airflow-api','airflow-scheduler')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','activate')
+        Compose @('up','-d','--wait','--wait-timeout','240','day45-redis','day45-api')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','http')
+        # Stop all scheduler/control-plane services. The serving JVM must remain useful.
+        Compose @('stop','airflow-api','airflow-scheduler','airflow-dag-processor','mlflow')
+        Compose @('exec','-T','day45-api','python','/opt/pymk/resilience_smoke.py','http')
+        # Backup and restore stopped Airflow metadata; application ledger/artifacts stay retained.
+        Compose @('exec','-T','airflow-db','pg_dump','-U','airflow_admin','-d','airflow','-Fc','-f','/tmp/day45.dump')
+        Compose @('exec','-T','airflow-db','pg_restore','-U','airflow_admin','-d','airflow','--clean','--if-exists','--exit-on-error','/tmp/day45.dump')
+        $env:PYMK_WORKFLOW_ALLOW_ACTIVATION = 'false'
+        Compose @('up','-d','--wait','--wait-timeout','240','airflow-api','airflow-scheduler','airflow-dag-processor')
+        Compose @('exec','-T','-e','MLFLOW_HTTP_REQUEST_MAX_RETRIES=0','-e','MLFLOW_HTTP_REQUEST_TIMEOUT=3','airflow-api','python','/opt/pymk/resilience_smoke.py','outage')
+        Compose @('up','-d','--wait','--wait-timeout','240','mlflow')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','restored')
+        # Drain the disposable serving process before the explicit operator rollback.
+        Compose @('stop','day45-api')
+        Compose @('exec','-T','airflow-api','java','-jar','/opt/pymk/pymk-batch.jar','--spring.batch.job.name=servingReleaseJob','action=rollback','releaseId=legacy','expectedEpoch=1')
+        Compose @('up','-d','--wait','--wait-timeout','240','day45-api')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','http')
+        Compose @('stop','airflow-scheduler')
+        Compose @('exec','-T','airflow-api','python','/opt/pymk/resilience_smoke.py','finish')
+    }
+    $scope = if ($IncludeDay45) { 'Days 41-45 orchestration resilience' } elseif ($IncludeDay44) { 'Days 41-44 workflows and recovery' } elseif ($IncludeDay43) { 'Days 41-43 workflows, reconciliation and historical backfills' } else { 'Day 42 scheduled workflows and Day 41 regression' }
     Write-Host "PASS: $scope. Evidence: $output"
 } finally {
     if ($project -notmatch '^pymk-day42-[a-f0-9]{10}$') { throw 'Unsafe cleanup target' }

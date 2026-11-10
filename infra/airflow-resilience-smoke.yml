@@ -1,0 +1,26 @@
+# Only for the isolated Day 45 smoke project. No normal development database is used.
+services:
+  day45-redis:
+    image: redis:7-alpine
+    mem_limit: 256m
+  day45-api:
+    image: pymk-airflow:3.2.2-day41
+    entrypoint: [java, -jar, /opt/pymk/pymk-api.jar]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://workflow-postgres:5432/pymk
+      SPRING_DATASOURCE_USERNAME: pymk
+      SPRING_DATASOURCE_PASSWORD: ${PYMK_WORKFLOW_DB_PASSWORD:?Smoke password required}
+      SPRING_DATA_REDIS_HOST: day45-redis
+      PYMK_EVENTS_RELAY_ENABLED: "false"
+      PYMK_EVENTS_CONSUMERS_ENABLED: "false"
+      PYMK_EVENTS_MONITORING_ENABLED: "false"
+      PYMK_SERVING_RANKER: L1
+      PYMK_HEAVY_RANKER_ENABLED: "false"
+      PYMK_LIGHT_RANKER_MODEL_PATH: /nonexistent/model.onnx
+      PYMK_LIGHT_RANKER_METADATA_PATH: /nonexistent/metadata.json
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/actuator/health', timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      retries: 36
+    mem_limit: 1g

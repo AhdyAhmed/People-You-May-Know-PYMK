@@ -6,11 +6,11 @@ multi-stage funnel architecture described in LinkedIn Engineering's public
 PYMK writeup: **candidate generation (L0) → light ranking (L1) → heavy
 ranking (L2) → re-ranking (exposure diversity)**.
 
-> **Status: Day 44 complete (M1–M7 complete; M8 in progress).** The API supports L0 → L1 → L2 → re-ranking,
+> **Status: Day 45 complete (M1–M8 complete; M9 next).** The API supports L0 → L1 → L2 → re-ranking,
 > with explicit opt-in and an L1-only default/rollback path.
 > Kafka ingestion/outbox, independently deduplicated journal consumers, bounded retries and acknowledged dead-letter recovery are implemented.
 > Live feature windows, durable cache invalidation, finite reconciliation and Kafka monitoring are implemented and verified. Optional MLflow infrastructure and opt-in tracking for all five ML workflows are verified.
-> MLflow lifecycle recovery, Airflow infrastructure, scheduled feature/model workflows, reconciliation/backfills and durable workflow recovery are implemented and verified. Day 45 end-to-end resilience, unified dashboards and packaging (M9–M10) remain planned.
+> MLflow lifecycle recovery, Airflow infrastructure, scheduled feature/model workflows, reconciliation/backfills, durable workflow recovery and orchestration resilience are implemented and verified. Unified dashboards and packaging (M9–M10) remain planned.
 > See [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md) for the day-by-day
 > build log and [`docs/PYMK_DESIGN.md`](docs/PYMK_DESIGN.md) for the full
 > system design.
@@ -32,7 +32,7 @@ demonstrates both sides of a modern recommendation system:
 
 ## Target architecture
 
-The diagram is the implemented recommendation funnel. At the current Day 44 checkpoint, the
+The diagram is the implemented recommendation funnel. At the current Day 45 checkpoint, the
 domain, data generator, embeddings, initial API, and complete L0 candidate
 pipeline, Redis caching, and learned L1 scoring are implemented and wired into
 the public endpoint. Offline L2 training and the opt-in Java L2 scorer are
@@ -304,6 +304,9 @@ and `./scripts/day41-airflow-smoke.ps1`.
 
 ### Day 44 recovery and controlled release workflows
 
+Day 45 operations are verified: see the [resilience runbook](docs/DAY45_ORCHESTRATION_RESILIENCE.md)
+for reviewed sync/report schedules, telemetry, conservative retention and recovery.
+
 Flyway V13 records durable workflow identities, Batch/MLflow evidence and output
 receipts. Database and inherited child-process locks fence retries; completed work
 is verified and reused. Manual `pymk_release_sync` and disabled-by-default
@@ -423,7 +426,7 @@ mvn -pl pymk-api spring-boot:run
 Then:
 ```bash
 curl http://localhost:8080/
-# {"service":"pymk-api","status":"up","milestone":"M8 - Day 44: Durable workflow recovery and controlled releases","scorer":"L1"}
+# {"service":"pymk-api","status":"up","milestone":"M8 - Day 45: Orchestration resilience and operations","scorer":"L1"}
 
 curl http://localhost:8080/api/v1/members/42      # a seeded member (Day 6, Part 1)
 curl 'http://localhost:8080/api/v1/pymk/42?limit=20' # Day 11 recommendations
@@ -823,7 +826,8 @@ day's scope and status lives in [`docs/PYMK_ROADMAP.md`](docs/PYMK_ROADMAP.md).
 - [x] **Day 42 — Scheduled feature and ML workflows**: daily managed refresh, independent weekly mature exports and tracked L1/L2/evaluation/blend/candidate preparation, completion-aware adapters, failed-refresh isolation and no automatic activation. Verified 2026-10-16: 278 Java tests, 106 Python tests, 17 Airflow tests and live positive/negative workflows. See [acceptance evidence](docs/DAY42_SCHEDULED_WORKFLOWS.md#acceptance).
 - [x] **Day 43 — Reconciliation and reproducible backfills**: scheduled database-fenced live repair, manual frozen-export backfills, explicit historical revisions/knowledge cutoffs, shared resource bounds and no automatic activation. Verified 2026-10-16: 279 Java tests, 106 Python tests, 20 Airflow tests and live replay/backfill checks. See [acceptance evidence](docs/DAY43_RECONCILIATION_BACKFILLS.md#acceptance).
 - [x] **Day 44 — Durable workflow recovery and controlled releases**: V13 identity ledger, database/inherited-child fencing, verified Batch/MLflow reuse, manual pinned synchronization and explicitly gated approved activation. Verified 2026-10-17: 280 Java tests, 106 Python tests, 24 Airflow tests and complete live Days 41–44 acceptance, including scheduler restart. See [evidence and limits](docs/DAY44_WORKFLOW_RECOVERY.md#acceptance).
-- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. Day 45 is next.
+- [x] **Day 45 — Orchestration resilience and operations**: scheduled sync/offline reports, V14 operational telemetry, conservative retention, packaged activation/rollback, control-plane outage isolation and metadata restore. Verified 2026-10-18: 280 Java, 106 Python and 28 Airflow tests plus orchestration, MLflow lifecycle and serving/Kafka acceptance. See [evidence and fixture limits](docs/DAY45_ORCHESTRATION_RESILIENCE.md#acceptance).
+- [ ] ... see the roadmap for the full plan through M10: Kafka → MLflow → Airflow/batch operations → observability → portfolio release. M9 is next.
 
 ## License
 

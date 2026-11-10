@@ -1,5 +1,9 @@
 # Day 44 — durable workflow recovery and controlled releases
 
+This is the Day 44 acceptance record. Day 45 adds a reviewed daily synchronization
+schedule and offline reporting; activation remains manual. See the
+[Day 45 runbook](DAY45_ORCHESTRATION_RESILIENCE.md) for current scheduling/operations.
+
 ## Ownership and identities
 
 Flyway V13 adds `pymk_workflow_work` to the **PYMK** database, not Airflow's

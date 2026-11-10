@@ -1,4 +1,4 @@
-"""Day 42 finite, allowlisted workers; no activation and no legacy feature writer."""
+"""Finite allowlisted workers; activation requires explicit independent M7 approval."""
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -18,6 +18,7 @@ STEPS = {"feature": ("validate", "embeddings", "stage"),
          "reconcile": ("validate", "reconcile"),
          "backfill": ("validate", "restore", "light", "heavy", "evaluate", "blend", "prepare"),
          "release_sync": ("validate", "sync", "stage"),
+         "offline_report": ("validate", "restore", "evaluate"),
          "approved_activation": ("validate", "activate")}
 
 
@@ -84,6 +85,8 @@ def validate(plan, now=None):
     elif kind == "reconcile":
         common -= {"transform", "sourceRevision"}
         specific = {"windowStart", "knowledgeCutoff"}
+    elif kind == "offline_report":
+        specific = {"history", "evaluationPolicy", "heavyModel", "heavyMetadata", "lightModel", "lightMetadata"}
     else:
         specific = {"profiles"} if kind == "feature" else {"history", "evaluationPolicy", "blendPolicy", "context"}
     require(set(plan) == common | specific, "Unexpected or missing workflow fields")
@@ -121,7 +124,8 @@ def validate(plan, now=None):
         resolve(plan["profiles"])
         require(cutoff <= end, "Transform trained after feature snapshot")
     else:
-        for name in ("evaluationPolicy", "blendPolicy", "context"):
+        for name in (("evaluationPolicy", "heavyModel", "heavyMetadata", "lightModel", "lightMetadata")
+                     if kind == "offline_report" else ("evaluationPolicy", "blendPolicy", "context")):
             resolve(plan[name])
         history = plan["history"]
         require(isinstance(history, list) and len(history) >= 3, "At least three historical generations required")
@@ -129,7 +133,7 @@ def validate(plan, now=None):
         ids = set()
         for item in history:
             fields = {"releaseId", "featureAsOf", "labelWindowEnd"}
-            if kind == "backfill":
+            if kind in ("backfill", "offline_report"):
                 fields |= {"knowledgeCutoff", "featureSourceRevision", "labelSourceRevision", "light", "heavy"}
             require(set(item) == fields, "Invalid history entry")
             ident = item["releaseId"]
@@ -139,7 +143,7 @@ def validate(plan, now=None):
             require(cutoff <= snapshot < label_end <= end, "Labels are not mature at interval cutoff")
             require(previous is None or previous <= snapshot, "Overlapping/out-of-order label horizons")
             previous = label_end
-            if kind == "backfill":
+            if kind in ("backfill", "offline_report"):
                 knowledge = instant(item["knowledgeCutoff"])
                 require(label_end <= knowledge <= end, "Historical knowledge cutoff outside mature interval")
                 for field in ("featureSourceRevision", "labelSourceRevision"):
@@ -288,6 +292,9 @@ def execute_owned(plan_ref, step, previous=None):
         for ref in result["artifacts"]: resolve(ref)
         return reference(completed)
     results = dict(prior["results"])
+    if plan["workflow"] == "offline_report":
+        for name in ("heavyModel", "heavyMetadata", "lightModel", "lightMetadata"):
+            results[name] = str(resolve(plan[name]))
     transform = resolve(plan["transform"]) if "transform" in plan else None
     version = plan["outputVersion"]
     if step == "sync":
@@ -375,7 +382,7 @@ def execute_owned(plan_ref, step, previous=None):
             require((directory / kind / "candidate.json").is_file(), "Missing prepared candidate")
         report = json.loads((work / "evaluate" / "evaluation.json").read_text())
         results["qualityGate"] = report["qualityGate"]["status"]
-        results["activationEligible"] = False  # approval/sync belongs to Day 44
+        results["activationEligible"] = False  # Candidate preparation never grants approval.
     validate(read(plan_ref))  # Detect input mutation during the worker, too.
     for ref in prior["artifacts"]:
         resolve(ref)
